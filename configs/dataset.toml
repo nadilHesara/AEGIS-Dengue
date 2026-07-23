@@ -1,6 +1,2 @@
 [dataset_urls]
 SRILANKA_WEEKLY_DATA = "https://raw.githubusercontent.com/thiyangt/denguedatahub/refs/heads/main/data-raw/srilanka_weekly_data.csv"
-
-
-[districts]
-districts = ["Colombo", "Gampaha", "Kalutara", "Kandy", "Matale", "Nuwara Eliya", "Galle", "Matara", "Hambantota", "Jaffna", "Kilinochchi", "Mannar", "Vavuniya", "Mullaitivu", "Batticaloa", "Ampara", "Trincomalee", "Kurunegala", "Puttalam", "Anuradhapura", "Polonnaruwa", "Badulla", "Monaragala", "Ratnapura", "Kegalle"]
