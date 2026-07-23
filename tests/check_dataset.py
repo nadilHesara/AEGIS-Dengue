@@ -5,7 +5,7 @@ import sys
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 
-def check_dataset_exists():
+def test_check_dataset_exists():
     """Check if data directory exists."""
     if not DATA_DIR.exists():
         print(f"❌ Data directory does not exist: {DATA_DIR}")
@@ -14,7 +14,7 @@ def check_dataset_exists():
     return True
 
 
-def check_dataset_files():
+def test_check_dataset_files():
     """Check for expected dataset files."""
     csv_files = list(DATA_DIR.glob("*.csv"))
     if not csv_files:
@@ -26,7 +26,7 @@ def check_dataset_files():
     return True
 
 
-def check_dataset_structure(file_path):
+def test_check_dataset_structure(file_path):
     """Check dataset structure and basic criteria."""
     try:
         df = pd.read_csv(file_path)
@@ -52,15 +52,15 @@ def main():
     print("Dataset Check Script")
     print("=" * 50)
     
-    if not check_dataset_exists():
+    if not test_check_dataset_exists():
         sys.exit(1)
     
-    if not check_dataset_files():
+    if not test_check_dataset_files():
         sys.exit(1)
     
     csv_files = list(DATA_DIR.glob("*.csv"))
     for csv_file in csv_files:
-        check_dataset_structure(csv_file)
+        test_check_dataset_structure(csv_file)
     
     print("\n" + "=" * 50)
     print("Dataset check completed!")
