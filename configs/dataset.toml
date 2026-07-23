@@ -1,0 +1,2 @@
+[dataset_urls]
+SRILANKA_WEEKLY_DATA = "https://raw.githubusercontent.com/thiyangt/denguedatahub/refs/heads/main/data-raw/srilanka_weekly_data.csv"
