@@ -31,4 +31,4 @@ jobs:
 
             - name: Check tests
               run: |
-                pytest tests/1.check_dataset.py
+                python -m pytest tests/
