@@ -1,3 +1,7 @@
 .venv
 
 data
+
+.pytest_cache
+
+tests/__pycache__
