@@ -1,4 +1,22 @@
-import pandas as pd
+"""
+Validate the raw weekly dengue data.
+
+This script never modifies, drops, or rewrites the source CSV. It keeps the
+original columns intact, adds derived columns, and classifies every finding
+as PASS, WARNING or FAIL.
+
+WARNING is used for documented source conventions that are usable and can be
+carried into modelling. FAIL is reserved for genuinely missing, impossible,
+duplicate or conflicting records.
+
+Outputs:
+    results/data_validation/dengue_validation_summary.md
+    results/data_validation/irregular_reporting_periods.csv
+    results/data_validation/known_calendar_gaps.csv
+    results/data_validation/weekday_conventions.csv
+    results/data_validation/incomplete_reporting_area_coverage.csv
+"""
+
 from pathlib import Path
 
 import pandas as pd
@@ -7,20 +25,145 @@ import pandas as pd
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 RAW_DATA_DIR = PROJECT_DIR / "data" / "raw"
+RESULTS_DIR = PROJECT_DIR / "results" / "data_validation"
+
+RAW_PATH = RAW_DATA_DIR / "srilanka_weekly_data.csv"
+
+SUMMARY_PATH = RESULTS_DIR / "dengue_validation_summary.md"
+IRREGULAR_PERIODS_PATH = RESULTS_DIR / "irregular_reporting_periods.csv"
+KNOWN_GAPS_PATH = RESULTS_DIR / "known_calendar_gaps.csv"
+WEEKDAY_CONVENTIONS_PATH = RESULTS_DIR / "weekday_conventions.csv"
+COVERAGE_ISSUES_PATH = RESULTS_DIR / "incomplete_reporting_area_coverage.csv"
+
+DATE_FORMAT = "%m/%d/%Y"
+
+EXPECTED_REPORTING_DAYS = 7
+
+# The raw file carries 26 reporting areas because Kalmune is reported
+# separately. Kalmune is merged into Ampara later to produce the 25 canonical
+# districts. Coverage is therefore validated against 26 at this stage.
+EXPECTED_SOURCE_REPORTING_AREAS = 26
+
+SOURCE_COLUMNS = [
+    "year",
+    "week",
+    "start.date",
+    "end.date",
+    "district",
+    "cases",
+]
+
+PASS = "PASS"
+WARNING = "WARNING"
+FAIL = "FAIL"
+
+
+# ---------------------------------------------------------------------------
+# Documented source conventions
+# ---------------------------------------------------------------------------
+
+# Observed start-weekday conventions, in chronological order. valid_to is
+# inclusive. The 2009 episode is a matched pair: an 8-day period (week 17)
+# pushed reporting onto Sunday, and a 6-day period (week 22) restored
+# Saturday. Week 17 itself still starts on a Saturday, so the Sunday window
+# begins at week 18.
+WEEKDAY_CONVENTIONS = [
+    {
+        "convention_id": 1,
+        "valid_from": pd.Timestamp("2006-12-23"),
+        "valid_to": pd.Timestamp("2009-04-25"),
+        "expected_start_weekday": "Saturday",
+        "description": (
+            "Original Saturday-to-Friday convention, including the 8-day "
+            "2009 week 17 period which still starts on a Saturday."
+        ),
+    },
+    {
+        "convention_id": 2,
+        "valid_from": pd.Timestamp("2009-04-26"),
+        "valid_to": pd.Timestamp("2009-05-29"),
+        "expected_start_weekday": "Sunday",
+        "description": (
+            "Temporary Sunday start caused by the 8-day 2009 week 17 "
+            "period. Ends with the 6-day 2009 week 22 period, which "
+            "restores the Saturday phase."
+        ),
+    },
+    {
+        "convention_id": 3,
+        "valid_from": pd.Timestamp("2009-05-30"),
+        "valid_to": pd.Timestamp("2025-12-26"),
+        "expected_start_weekday": "Saturday",
+        "description": (
+            "Saturday convention restored from 2009 week 23 until the last "
+            "Saturday-start period, 2025-12-20 to 2025-12-26."
+        ),
+    },
+    {
+        "convention_id": 4,
+        "valid_from": pd.Timestamp("2025-12-29"),
+        "valid_to": pd.NaT,
+        "expected_start_weekday": "Monday",
+        "description": (
+            "Permanent Monday-to-Sunday convention from the period labelled "
+            "2026 week 1 onward."
+        ),
+    },
+]
+
+# Calendar discontinuities that are documented source behaviour. Anything not
+# listed here is reported as a FAIL. The two 2025 days are genuinely absent
+# from the source, so the gap is recorded rather than filled.
+ACCEPTED_CALENDAR_GAPS = [
+    {
+        "previous_period_end": pd.Timestamp("2025-12-26"),
+        "next_period_start": pd.Timestamp("2025-12-29"),
+        "reason": (
+            "Seam between the Saturday and Monday reporting conventions. "
+            "2025-12-27 and 2025-12-28 are not covered by any reporting "
+            "period in the source. Carried as an unobserved interval, never "
+            "interpolated."
+        ),
+        "classification": FAIL,
+    },
+]
+
+# Number of confirmed incomplete-coverage periods in the source: the missing
+# Puttalam record in 2026 week 7. A higher count is a regression.
+EXPECTED_COVERAGE_ISSUES = 1
+
+# Reporting periods whose inclusive length is not seven days but which are
+# confirmed source behaviour rather than data errors.
+KNOWN_IRREGULAR_PERIODS = [
+    {
+        "start_date": pd.Timestamp("2009-04-18"),
+        "end_date": pd.Timestamp("2009-04-25"),
+        "reporting_days": 8,
+        "reason": (
+            "Source extended 2009 week 17 by one day, moving reporting "
+            "starts from Saturday to Sunday."
+        ),
+    },
+    {
+        "start_date": pd.Timestamp("2009-05-24"),
+        "end_date": pd.Timestamp("2009-05-29"),
+        "reporting_days": 6,
+        "reason": (
+            "Source shortened 2009 week 22 by one day, restoring Saturday "
+            "reporting from week 23."
+        ),
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# Loading and derived columns
+# ---------------------------------------------------------------------------
 
 def validate_required_columns(df: pd.DataFrame) -> None:
-    """Ensure that all required columns exist."""
+    """Ensure that all required source columns exist."""
 
-    required_columns = {
-        "year",
-        "week",
-        "start.date",
-        "end.date",
-        "district",
-        "cases",
-    }
-
-    missing_columns = required_columns - set(df.columns)
+    missing_columns = set(SOURCE_COLUMNS) - set(df.columns)
 
     if missing_columns:
         raise ValueError(
@@ -1110,15 +1253,32 @@ def print_validation_summary(validation: dict) -> None:
             print(f"{status:<8} {name} - {count} finding(s)")
 
 
-def count_failed_checks(
-    validation_results: dict[str, pd.DataFrame],
-) -> int:
-    """Return the number of validation checks that found issues."""
+def write_validation_outputs(validation: dict) -> None:
+    """Write the summary table and the supporting reference CSVs."""
 
-    return sum(
-        1
-        for issue_rows in validation_results.values()
-        if len(issue_rows) > 0
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    summary = build_summary_table(validation)
+
+    SUMMARY_PATH.write_text(
+        "# Dengue validation summary\n\n"
+        + summary.to_markdown(index=False)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    validation["checks"]["irregular_reporting_periods"][1].to_csv(
+        IRREGULAR_PERIODS_PATH, index=False
+    )
+
+    validation["known_calendar_gaps"].to_csv(KNOWN_GAPS_PATH, index=False)
+
+    validation["weekday_conventions"].to_csv(
+        WEEKDAY_CONVENTIONS_PATH, index=False
+    )
+
+    validation["checks"]["incomplete_reporting_area_coverage"][1].to_csv(
+        COVERAGE_ISSUES_PATH, index=False
     )
 
 
