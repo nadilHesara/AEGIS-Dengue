@@ -374,10 +374,44 @@ def print_validation_summary(
         else:
             print(f"FAIL: {check_name} — {issue_count} issue(s)")
 
-if __name__ == "__main__":
-    
-    df = pd.read_csv(RAW_DATA_DIR / "srilanka_weekly_data.csv")
-    
-    print_validation_summary(
-        validate_weekly_dengue_data(df)
+
+def count_failed_checks(
+    validation_results: dict[str, pd.DataFrame],
+) -> int:
+    """Return the number of validation checks that found issues."""
+
+    return sum(
+        1
+        for issue_rows in validation_results.values()
+        if len(issue_rows) > 0
     )
+
+
+def main() -> int:
+    """
+    Validate the raw weekly dengue data.
+
+    Returns a process exit code so that continuous integration fails
+    when any validation check finds issues.
+    """
+
+    df = pd.read_csv(RAW_DATA_DIR / "srilanka_weekly_data.csv")
+
+    validation_results = validate_weekly_dengue_data(df)
+
+    print_validation_summary(validation_results)
+
+    failed_checks = count_failed_checks(validation_results)
+
+    if failed_checks:
+        print(
+            f"\n{failed_checks} validation check(s) failed."
+        )
+        return 1
+
+    print("\nAll validation checks passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
