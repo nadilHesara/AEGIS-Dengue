@@ -376,21 +376,19 @@ def find_invalid_end_dates(df: pd.DataFrame) -> pd.DataFrame:
     ].copy()
 
 
-def find_impossible_date_ranges(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Return rows whose date interval cannot exist. FAIL.
+def find_invalid_date_ranges(df: pd.DataFrame) -> pd.DataFrame:
+    """Return rows where end date is not six days after start date."""
 
-    An interval is impossible when the start date falls after the end date,
-    or when the inclusive length is zero or negative. A length that is
-    merely not seven days is an irregular period, not an impossible one.
-    """
-
-    both_parsed = df["start_date"].notna() & df["end_date"].notna()
-
-    invalid_mask = both_parsed & (
-        df["start_date"].gt(df["end_date"])
-        | df["reporting_days"].le(0)
+    valid_dates = (
+        df["start_date_parsed"].notna()
+        & df["end_date_parsed"].notna()
     )
+
+    day_difference = (
+        df["end_date_parsed"] - df["start_date_parsed"]
+    ).dt.days
+
+    invalid_mask = valid_dates & day_difference.ne(6)
 
     return df.loc[
         invalid_mask,
@@ -830,19 +828,21 @@ def build_reporting_area_coverage(
     expected_area_count: int = EXPECTED_SOURCE_REPORTING_AREAS,
 ) -> pd.DataFrame:
     """
-    Build the per-period reporting-area coverage table.
+    Return rows whose start dates are not on the expected weekday.
 
-    Coverage is validated against the source reporting areas, before
-    canonical district mapping. Kalmune is still separate at this stage, so
-    a complete period contains 26 areas.
+    Example expected_weekday values:
+    - "Saturday"
+    - "Sunday"
+    - "Monday"
     """
 
-    all_areas = set(df["district"].dropna().astype(str).str.strip().unique())
+    valid_mask = df["start_date_parsed"].notna()
 
-    area_by_interval = (
-        df.loc[df["start_date"].notna() & df["end_date"].notna()]
-        .groupby(["start_date", "end_date"])["district"]
-        .agg(lambda values: set(values.astype(str).str.strip()))
+    actual_weekday = df["start_date_parsed"].dt.day_name()
+
+    invalid_mask = (
+        valid_mask
+        & actual_weekday.ne(expected_weekday)
     )
 
     coverage = periods[
@@ -855,99 +855,57 @@ def build_reporting_area_coverage(
         ]
     ].copy()
 
-    present = [
-        area_by_interval.get((row["start_date"], row["end_date"]), set())
-        for _, row in coverage.iterrows()
-    ]
+    result["actual_weekday"] = actual_weekday.loc[invalid_mask]
+    result["expected_weekday"] = expected_weekday
 
-    coverage["reporting_area_count"] = [len(areas) for areas in present]
-
-    coverage["missing_reporting_areas"] = [
-        "; ".join(sorted(all_areas - areas)) for areas in present
-    ]
-
-    coverage["is_complete_source_coverage"] = coverage[
-        "reporting_area_count"
-    ].eq(expected_area_count)
-
-    return coverage
+    return result
 
 
-def find_incomplete_reporting_area_coverage(
-    coverage: pd.DataFrame,
-) -> pd.DataFrame:
-    """Return periods that do not contain every source reporting area. FAIL."""
-
-    return coverage.loc[~coverage["is_complete_source_coverage"]].copy()
-
-
-def find_duplicate_reporting_area_periods(df: pd.DataFrame) -> pd.DataFrame:
+def find_non_consecutive_weeks(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Return duplicate reporting-area records within one date interval. FAIL.
+    Return reporting weeks that are not seven days apart.
 
-    Duplication is checked on the date interval rather than on the source
-    year and week, because the source label is not a reliable key.
+    The check is performed once per unique year-week instead of once
+    per district.
     """
 
-    area_clean = (
-        df["district"].astype("string").str.strip().str.casefold()
+    weekly_dates = (
+        df.loc[
+            df["start_date_parsed"].notna(),
+            [
+                "year",
+                "week",
+                "start_date_parsed",
+            ],
+        ]
+        .drop_duplicates()
+        .sort_values("start_date_parsed")
+        .reset_index(drop=True)
     )
 
-    checked = df.assign(reporting_area_clean=area_clean)
-
-    duplicate_mask = checked.duplicated(
-        subset=["start_date", "end_date", "reporting_area_clean"],
-        keep=False,
+    weekly_dates["previous_start_date"] = (
+        weekly_dates["start_date_parsed"].shift(1)
     )
 
-    return checked.loc[
-        duplicate_mask,
-        [
-            "year",
-            "week",
-            "start.date",
-            "end.date",
-            "district",
-            "cases",
-        ],
-    ].sort_values(["start.date", "district"]).copy()
-
-
-# ---------------------------------------------------------------------------
-# Value checks
-# ---------------------------------------------------------------------------
-
-def find_missing_reporting_areas(df: pd.DataFrame) -> pd.DataFrame:
-    """Return rows where the reporting area is missing or blank. FAIL."""
-
-    area_text = df["district"].astype("string").str.strip()
-
-    invalid_mask = area_text.isna() | area_text.eq("")
-
-    return df.loc[
-        invalid_mask,
-        ["year", "week", "district", "cases"],
-    ].copy()
-
-
-def find_invalid_case_values(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Return rows where cases are not non-negative whole numbers. FAIL.
-
-    Invalid examples: text, negative numbers, decimals, missing values.
-    """
-
-    numeric_cases = pd.to_numeric(df["cases"], errors="coerce")
+    weekly_dates["gap_days"] = (
+        weekly_dates["start_date_parsed"]
+        - weekly_dates["previous_start_date"]
+    ).dt.days
 
     invalid_mask = (
-        numeric_cases.isna()
-        | numeric_cases.lt(0)
-        | numeric_cases.mod(1).ne(0)
+        weekly_dates["previous_start_date"].notna()
+        & weekly_dates["gap_days"].ne(7)
     )
 
     result = df.loc[
         invalid_mask,
-        ["year", "week", "district", "cases"],
+        [
+            "year",
+            "week",
+            "previous_start_date",
+            "start_date_parsed",
+            "gap_days",
+        ],
     ].copy()
 
     result["numeric_cases"] = numeric_cases.loc[invalid_mask]
@@ -1188,371 +1146,12 @@ def print_validation_summary(validation: dict) -> None:
         if status == PASS:
             print(f"{PASS:<8} {name}")
         else:
-            print(f"{status:<8} {name} - {count} finding(s)")
-
-
-def build_summary_markdown(validation: dict) -> str:
-    """Render the Markdown validation summary."""
-
-    periods = validation["periods"]
-    rows = validation["rows"]
-    checks = validation["checks"]
-
-    lines: list[str] = []
-
-    lines.append("# Dengue validation summary")
-    lines.append("")
-    lines.append(
-        f"- Source file: `{RAW_PATH.relative_to(PROJECT_DIR).as_posix()}`"
-    )
-    lines.append(f"- Rows: {len(rows):,}")
-    lines.append(f"- Unique reporting periods: {len(periods):,}")
-    lines.append(
-        f"- Coverage: {periods['start_date'].min().date()} to "
-        f"{periods['end_date'].max().date()}"
-    )
-    lines.append(
-        f"- Source reporting areas: {rows['district'].nunique()} "
-        f"(expected {EXPECTED_SOURCE_REPORTING_AREAS} before Kalmune is "
-        "merged into Ampara)"
-    )
-    lines.append(f"- Date format: `{DATE_FORMAT}`")
-    lines.append("")
-
-    lines.append("## Check results")
-    lines.append("")
-    lines.append("| Check | Status | Findings |")
-    lines.append("| --- | --- | ---: |")
-
-    for name, (severity, findings) in checks.items():
-        status = classify_check(severity, findings)
-        lines.append(f"| `{name}` | {status} | {len(findings)} |")
-
-    lines.append("")
-    lines.append(
-        "PASS means no problem found. WARNING means a known source "
-        "irregularity that can be retained and modelled. FAIL means a "
-        "genuinely missing, impossible, duplicate or conflicting record."
-    )
-    lines.append("")
-
-    irregular = checks["irregular_reporting_periods"][1]
-
-    lines.append("## Irregular reporting periods (WARNING)")
-    lines.append("")
-
-    if irregular.empty:
-        lines.append("Every reporting period covers exactly seven days.")
-    else:
-        lines.append("| Period | Source year | Source week | Start | End | Days | Reason |")
-        lines.append("| ---: | ---: | ---: | --- | --- | ---: | --- |")
-
-        for _, row in irregular.iterrows():
-            lines.append(
-                f"| {row['period_id']} | {row['source_year']} | "
-                f"{row['source_week']} | {row['start_date'].date()} | "
-                f"{row['end_date'].date()} | {int(row['reporting_days'])} | "
-                f"{row['reason']} |"
-            )
-
-    lines.append("")
-    lines.append(
-        "These periods are usable. The pair is phase-neutral: the 8-day "
-        "period moved reporting starts to Sunday and the 6-day period "
-        "restored Saturday, so no calendar day is lost or double-counted."
-    )
-    lines.append("")
-
-    lines.append("## Weekday conventions (WARNING on change)")
-    lines.append("")
-    lines.append("| Convention | Valid from | Valid to | Expected start | Description |")
-    lines.append("| ---: | --- | --- | --- | --- |")
-
-    for _, row in validation["weekday_conventions"].iterrows():
-        valid_to = (
-            "open" if pd.isna(row["valid_to"]) else str(row["valid_to"].date())
-        )
-
-        lines.append(
-            f"| {row['convention_id']} | {row['valid_from'].date()} | "
-            f"{valid_to} | {row['expected_start_weekday']} | "
-            f"{row['description']} |"
-        )
-
-    lines.append("")
-
-    gaps = validation["known_calendar_gaps"]
-
-    lines.append("## Calendar gaps")
-    lines.append("")
-
-    if gaps.empty:
-        lines.append("The reporting calendar is continuous throughout.")
-    else:
-        lines.append("| Previous period end | Next period start | Gap start | Gap end | Days | Reason |")
-        lines.append("| --- | --- | --- | --- | ---: | --- |")
-
-        for _, row in gaps.iterrows():
-            lines.append(
-                f"| {row['previous_period_end'].date()} | "
-                f"{row['next_period_start'].date()} | "
-                f"{row['gap_start'].date()} | {row['gap_end'].date()} | "
-                f"{row['gap_days']} | {row['reason']} |"
-            )
-
-    lines.append("")
-
-    coverage_issues = checks["incomplete_reporting_area_coverage"][1]
-
-    lines.append("## Reporting-area coverage")
-    lines.append("")
-
-    if coverage_issues.empty:
-        lines.append(
-            f"Every reporting period contains all "
-            f"{EXPECTED_SOURCE_REPORTING_AREAS} source reporting areas."
-        )
-    else:
-        lines.append("| Period | Source year | Source week | Start | End | Areas | Missing |")
-        lines.append("| ---: | ---: | ---: | --- | --- | ---: | --- |")
-
-        for _, row in coverage_issues.iterrows():
-            lines.append(
-                f"| {row['period_id']} | {row['source_year']} | "
-                f"{row['source_week']} | {row['start_date'].date()} | "
-                f"{row['end_date'].date()} | "
-                f"{row['reporting_area_count']} | "
-                f"{row['missing_reporting_areas']} |"
-            )
-
-        lines.append("")
-        lines.append(
-            "Missing records stay missing. Cases are not filled with zero, "
-            "copied from a neighbouring period, or interpolated, and the "
-            "period is not dropped."
-        )
-
-    lines.append("")
-
-    out_of_order = checks["out_of_order_source_weeks"][1]
-
-    lines.append("## Source year-week labels")
-    lines.append("")
-
-    if out_of_order.empty:
-        lines.append("Source week numbers follow chronological date order.")
-    else:
-        lines.append(
-            "The following source labels do not follow chronological order. "
-            "They are positioned by their actual dates through `period_id` "
-            "and their source labels are left untouched."
-        )
-        lines.append("")
-        lines.append("| Period | Source year | Source week | Start | End | Previous label |")
-        lines.append("| ---: | ---: | ---: | --- | --- | --- |")
-
-        for _, row in out_of_order.iterrows():
-            lines.append(
-                f"| {row['period_id']} | {row['source_year']} | "
-                f"{row['source_week']} | {row['start_date'].date()} | "
-                f"{row['end_date'].date()} | "
-                f"{int(row['previous_source_year'])} week "
-                f"{int(row['previous_source_week'])} |"
-            )
-
-    lines.append("")
-
-    week_53 = periods.loc[
-        periods["source_year"].eq(2026) & periods["source_week"].eq(53)
-    ]
-
-    if not week_53.empty:
-        row = week_53.iloc[0]
-
-        lines.append(
-            f"The interval labelled 2026 week 53 covers "
-            f"{row['start_date'].date()} to {row['end_date'].date()} and is "
-            f"assigned `period_id` {row['period_id']}, before 2026 week 1. "
-            "Its source label is reported but never rewritten."
-        )
-        lines.append("")
-
-    lines.append("## Chronological ordering")
-    lines.append("")
-    lines.append(
-        "`period_id` is assigned by sorting unique reporting intervals on "
-        "`start_date` then `end_date`. It is the primary key for sorting, "
-        "merging, lagging and model windowing. `source_year` and "
-        "`source_week` are retained for traceability only."
-    )
-    lines.append("")
-
-    return "\n".join(lines)
-
-
-def write_outputs(validation: dict) -> list[Path]:
-    """Write every validation artefact and return the written paths."""
-
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-
-    outputs = {
-        IRREGULAR_PERIODS_PATH: validation["checks"][
-            "irregular_reporting_periods"
-        ][1],
-        KNOWN_GAPS_PATH: validation["known_calendar_gaps"],
-        WEEKDAY_CONVENTIONS_PATH: validation["weekday_conventions"],
-        COVERAGE_ISSUES_PATH: validation["checks"][
-            "incomplete_reporting_area_coverage"
-        ][1],
-    }
-
-    for path, frame in outputs.items():
-        frame.to_csv(path, index=False)
-
-    SUMMARY_PATH.write_text(
-        build_summary_markdown(validation),
-        encoding="utf-8",
-    )
-
-    return [SUMMARY_PATH, *outputs.keys()]
-
-
-def print_interpretation(validation: dict) -> None:
-    """Explain how each finding should be treated downstream."""
-
-    gaps = validation["known_calendar_gaps"]
-
-    coverage_issues = validation["checks"][
-        "incomplete_reporting_area_coverage"
-    ][1]
-
-    print("\nHow to read these results")
-    print("-" * 62)
-
-    print("\nHarmless source conventions:")
-    print(
-        "  - The 8-day 2009 week 17 and 6-day 2009 week 22 periods. They "
-        "are a\n    matched pair that leaves the calendar continuous."
-    )
-    print(
-        "  - The Sunday starts in 2009 weeks 18 to 22 and the permanent "
-        "Monday\n    starts from 2026 week 1. Both are source convention "
-        "changes."
-    )
-    print(
-        "  - Week 1 periods that begin in the previous December. That is "
-        "the\n    source's normal year rollover."
-    )
-
-    print("\nMust be carried as data-quality flags:")
-
-    if gaps.empty:
-        print("  - No calendar gaps.")
-    else:
-        for _, row in gaps.iterrows():
-            print(
-                f"  - {row['gap_days']} uncovered calendar day(s): "
-                f"{row['gap_start'].date()} to {row['gap_end'].date()}. "
-                "Unobserved,\n    not zero."
-            )
-
-    if coverage_issues.empty:
-        print("  - No incomplete reporting-area periods.")
-    else:
-        for _, row in coverage_issues.iterrows():
-            print(
-                f"  - Missing reporting area(s) in source "
-                f"{row['source_year']} week {row['source_week']} "
-                f"({row['start_date'].date()} to "
-                f"{row['end_date'].date()}): "
-                f"{row['missing_reporting_areas']}."
-            )
-
-    print(
-        "  - The interval labelled 2026 week 53 covers 2025-12-20 to "
-        "2025-12-26.\n    Flag the label; order by dates."
-    )
-
-    print("\nColumns to use for the weather merge:")
-    print("  - period_id      primary key for joining, lagging and windowing")
-    print("  - start_date     inclusive interval start")
-    print("  - end_date       inclusive interval end")
-    print("  - district       reporting area, before canonical mapping")
-    print(
-        "  Aggregate weather over the actual [start_date, end_date] interval. "
-        "Never\n  join on year and week, and never assume a fixed weekday or "
-        "a 7-day span."
-    )
-
-    print("\nWhy raw year and week must not order the series:")
-    print(
-        "  The source label is not chronological. 2026 week 53 covers "
-        "2025-12-20 to\n  2025-12-26, which precedes 2026 week 1 "
-        "(2025-12-29). Sorting on the raw\n  label places it 52 positions "
-        "too late and silently misaligns every\n  time-ordered join and lag. "
-        "Sort on period_id instead."
-    )
-
-    print("\nWhy missing Puttalam cases must stay missing:")
-    print(
-        "  A zero asserts that Puttalam observed no dengue cases that week. "
-        "The\n  source makes no such statement - the record is simply "
-        "absent. Writing zero\n  turns an unobserved value into a confident "
-        "observation, biases case totals\n  and trend estimates downward, "
-        "and hides the gap from every later check.\n  Keep it as an explicit "
-        "missing value on the node-period grid so models can\n  treat it as "
-        "unobserved."
-    )
-
-
-def main() -> int:
-    """
-    Validate the raw weekly dengue data.
-
-    Returns a process exit code. WARNING findings never fail the run, and
-    neither do the two confirmed source defects, which are permanent and
-    already documented. Any FAIL finding beyond those is a regression and
-    fails the run.
-    """
-
-    df = pd.read_csv(RAW_PATH)
-
-    validation = validate_weekly_dengue_data(df)
-
-    print_validation_summary(validation)
-
-    written = write_outputs(validation)
-
-    print("\nWrote:")
-    for path in written:
-        print(f"  {path.relative_to(PROJECT_DIR).as_posix()}")
-
-    print_interpretation(validation)
-
-    failed_checks = count_failed_checks(validation)
-    unexpected = count_unexpected_failures(validation)
-
-    summary_path = SUMMARY_PATH.relative_to(PROJECT_DIR).as_posix()
-
-    if unexpected:
-        print(
-            f"\n{unexpected} undocumented FAIL finding(s) beyond the known "
-            f"source defects.\nThis is a regression. See {summary_path}."
-        )
-        return 1
-
-    if failed_checks:
-        print(
-            f"\n{failed_checks} check(s) classified as FAIL, all matching "
-            "the confirmed source\ndefects: the 2-day calendar gap and the "
-            "missing Puttalam record. Carried as\ndata-quality flags rather "
-            f"than repaired. See {summary_path}."
-        )
-        return 0
-
-    print("\nNo FAIL-level findings.")
-    return 0
-
+            print(f"FAIL: {check_name} — {issue_count} issue(s)")
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    
+    df = pd.read_csv(RAW_DATA_DIR / "srilanka_weekly_data.csv")
+    
+    print_validation_summary(
+        validate_weekly_dengue_data(df)
+    )
