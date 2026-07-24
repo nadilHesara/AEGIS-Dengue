@@ -82,7 +82,13 @@ def find_invalid_end_dates(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def find_invalid_date_ranges(df: pd.DataFrame) -> pd.DataFrame:
-    """Return rows where end date is not six days after start date."""
+    """
+    Return unexpected reporting-period lengths.
+
+    Two known source periods are intentionally irregular:
+    - 2009 week 17: 8 days
+    - 2009 week 22: 6 days
+    """
 
     valid_dates = (
         df["start_date_parsed"].notna()
@@ -93,7 +99,23 @@ def find_invalid_date_ranges(df: pd.DataFrame) -> pd.DataFrame:
         df["end_date_parsed"] - df["start_date_parsed"]
     ).dt.days
 
-    invalid_mask = valid_dates & day_difference.ne(6)
+    known_irregular_period = (
+        (
+            df["start_date_parsed"].eq(pd.Timestamp("2009-04-18"))
+            & df["end_date_parsed"].eq(pd.Timestamp("2009-04-25"))
+        )
+        |
+        (
+            df["start_date_parsed"].eq(pd.Timestamp("2009-05-24"))
+            & df["end_date_parsed"].eq(pd.Timestamp("2009-05-29"))
+        )
+    )
+
+    invalid_mask = (
+        valid_dates
+        & day_difference.ne(6)
+        & ~known_irregular_period
+    )
 
     result = df.loc[
         invalid_mask,
@@ -235,21 +257,39 @@ def find_unexpected_start_weekdays(
     expected_weekday: str = "Saturday",
 ) -> pd.DataFrame:
     """
-    Return rows whose start dates are not on the expected weekday.
+    Validate reporting weekdays using the known source conventions.
 
-    Example expected_weekday values:
-    - "Saturday"
-    - "Sunday"
-    - "Monday"
+    Normal convention: Saturday
+    2009-04-26 to 2009-05-24: Sunday
+    From 2025-12-29 onward: Monday
     """
 
-    valid_mask = df["start_date_parsed"].notna()
+    start_dates = df["start_date_parsed"]
+    valid_mask = start_dates.notna()
 
-    actual_weekday = df["start_date_parsed"].dt.day_name()
+    actual_weekday = start_dates.dt.day_name()
+
+    expected = pd.Series(
+        expected_weekday,
+        index=df.index,
+        dtype="string",
+    )
+
+    sunday_period = start_dates.between(
+        pd.Timestamp("2009-04-26"),
+        pd.Timestamp("2009-05-24"),
+    )
+
+    monday_period = start_dates.ge(
+        pd.Timestamp("2025-12-29")
+    )
+
+    expected.loc[sunday_period] = "Sunday"
+    expected.loc[monday_period] = "Monday"
 
     invalid_mask = (
         valid_mask
-        & actual_weekday.ne(expected_weekday)
+        & actual_weekday.ne(expected)
     )
 
     result = df.loc[
@@ -264,29 +304,36 @@ def find_unexpected_start_weekdays(
     ].copy()
 
     result["actual_weekday"] = actual_weekday.loc[invalid_mask]
-    result["expected_weekday"] = expected_weekday
+    result["expected_weekday"] = expected.loc[invalid_mask]
 
     return result
 
 
 def find_non_consecutive_weeks(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Return reporting weeks that are not seven days apart.
+    Return unexpected gaps or overlaps between reporting periods.
 
-    The check is performed once per unique year-week instead of once
-    per district.
+    Continuity is checked using the previous end date instead of
+    expecting every pair of start dates to be seven days apart.
     """
 
     weekly_dates = (
         df.loc[
-            df["start_date_parsed"].notna(),
+            df["start_date_parsed"].notna()
+            & df["end_date_parsed"].notna(),
             [
                 "year",
                 "week",
                 "start_date_parsed",
+                "end_date_parsed",
             ],
         ]
-        .drop_duplicates()
+        .drop_duplicates(
+            subset=[
+                "start_date_parsed",
+                "end_date_parsed",
+            ]
+        )
         .sort_values("start_date_parsed")
         .reset_index(drop=True)
     )
@@ -295,14 +342,34 @@ def find_non_consecutive_weeks(df: pd.DataFrame) -> pd.DataFrame:
         weekly_dates["start_date_parsed"].shift(1)
     )
 
+    weekly_dates["previous_end_date"] = (
+        weekly_dates["end_date_parsed"].shift(1)
+    )
+
     weekly_dates["gap_days"] = (
         weekly_dates["start_date_parsed"]
         - weekly_dates["previous_start_date"]
     ).dt.days
 
+    weekly_dates["days_since_previous_end"] = (
+        weekly_dates["start_date_parsed"]
+        - weekly_dates["previous_end_date"]
+    ).dt.days
+
+    # Known two-day source gap during the reporting convention change.
+    known_calendar_gap = (
+        weekly_dates["previous_end_date"].eq(
+            pd.Timestamp("2025-12-26")
+        )
+        & weekly_dates["start_date_parsed"].eq(
+            pd.Timestamp("2025-12-29")
+        )
+    )
+
     invalid_mask = (
-        weekly_dates["previous_start_date"].notna()
-        & weekly_dates["gap_days"].ne(7)
+        weekly_dates["previous_end_date"].notna()
+        & weekly_dates["days_since_previous_end"].ne(1)
+        & ~known_calendar_gap
     )
 
     return weekly_dates.loc[
@@ -313,6 +380,8 @@ def find_non_consecutive_weeks(df: pd.DataFrame) -> pd.DataFrame:
             "previous_start_date",
             "start_date_parsed",
             "gap_days",
+            "previous_end_date",
+            "days_since_previous_end",
         ],
     ].copy()
 
@@ -374,10 +443,44 @@ def print_validation_summary(
         else:
             print(f"FAIL: {check_name} — {issue_count} issue(s)")
 
-if __name__ == "__main__":
-    
-    df = pd.read_csv(RAW_DATA_DIR / "srilanka_weekly_data.csv")
-    
-    print_validation_summary(
-        validate_weekly_dengue_data(df)
+
+def count_failed_checks(
+    validation_results: dict[str, pd.DataFrame],
+) -> int:
+    """Return the number of validation checks that found issues."""
+
+    return sum(
+        1
+        for issue_rows in validation_results.values()
+        if len(issue_rows) > 0
     )
+
+
+def main() -> int:
+    """
+    Validate the raw weekly dengue data.
+
+    Returns a process exit code so that continuous integration fails
+    when any validation check finds issues.
+    """
+
+    df = pd.read_csv(RAW_DATA_DIR / "srilanka_weekly_data.csv")
+
+    validation_results = validate_weekly_dengue_data(df)
+
+    print_validation_summary(validation_results)
+
+    failed_checks = count_failed_checks(validation_results)
+
+    if failed_checks:
+        print(
+            f"\n{failed_checks} validation check(s) failed."
+        )
+        return 1
+
+    print("\nAll validation checks passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
