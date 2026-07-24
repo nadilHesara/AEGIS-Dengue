@@ -376,19 +376,25 @@ def find_invalid_end_dates(df: pd.DataFrame) -> pd.DataFrame:
     ].copy()
 
 
-def find_invalid_date_ranges(df: pd.DataFrame) -> pd.DataFrame:
-    """Return rows where end date is not six days after start date."""
+def find_impossible_date_ranges(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return rows whose end date does not follow their start date.
+
+    Only genuinely impossible intervals are reported here. Periods that are
+    simply not seven days long are legitimate source behaviour and are
+    reported separately as irregular reporting periods.
+    """
 
     valid_dates = (
-        df["start_date_parsed"].notna()
-        & df["end_date_parsed"].notna()
+        df["start_date"].notna()
+        & df["end_date"].notna()
     )
 
     day_difference = (
-        df["end_date_parsed"] - df["start_date_parsed"]
+        df["end_date"] - df["start_date"]
     ).dt.days
 
-    invalid_mask = valid_dates & day_difference.ne(6)
+    invalid_mask = valid_dates & day_difference.lt(0)
 
     return df.loc[
         invalid_mask,
@@ -403,6 +409,32 @@ def find_invalid_date_ranges(df: pd.DataFrame) -> pd.DataFrame:
             "reporting_days",
         ],
     ].copy()
+
+
+def find_invalid_case_values(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return rows whose case count is missing, non-numeric or negative.
+
+    Case counts are weekly notification totals, so any value that is not a
+    non-negative whole number is a source defect.
+    """
+
+    numeric_cases = pd.to_numeric(df["cases"], errors="coerce")
+
+    invalid_mask = (
+        numeric_cases.isna()
+        | numeric_cases.lt(0)
+        | numeric_cases.ne(numeric_cases.round())
+    )
+
+    result = df.loc[
+        invalid_mask,
+        ["year", "week", "start_date", "end_date", "district", "cases"],
+    ].copy()
+
+    result["numeric_cases"] = numeric_cases.loc[invalid_mask]
+
+    return result
 
 
 def find_irregular_reporting_periods(periods: pd.DataFrame) -> pd.DataFrame:
@@ -783,6 +815,53 @@ def find_duplicate_date_intervals(df: pd.DataFrame) -> pd.DataFrame:
     ).copy()
 
 
+def find_duplicate_reporting_area_periods(df: pd.DataFrame) -> pd.DataFrame:
+    """Return reporting areas recorded more than once in the same period."""
+
+    valid = df.loc[
+        df["start_date"].notna() & df["end_date"].notna(),
+        ["year", "week", "start_date", "end_date", "district", "cases"],
+    ]
+
+    duplicated = valid.duplicated(
+        subset=["start_date", "end_date", "district"],
+        keep=False,
+    )
+
+    return valid.loc[duplicated].sort_values(
+        ["start_date", "district"]
+    ).copy()
+
+
+def find_missing_reporting_areas(
+    df: pd.DataFrame,
+    expected_area_count: int = EXPECTED_SOURCE_REPORTING_AREAS,
+) -> pd.DataFrame:
+    """
+    Return reporting areas missing from the source as a whole.
+
+    This is the structural check: the source should carry every expected
+    reporting area somewhere. An area that is present but absent from
+    individual periods is a coverage issue, not a missing area, and is
+    reported by build_reporting_area_coverage instead.
+    """
+
+    observed = sorted(df["district"].dropna().unique())
+
+    if len(observed) >= expected_area_count:
+        return pd.DataFrame(columns=["district", "reason"])
+
+    return pd.DataFrame(
+        {
+            "district": ["<unknown>"],
+            "reason": [
+                f"Source carries {len(observed)} reporting areas, "
+                f"expected {expected_area_count}."
+            ],
+        }
+    )
+
+
 def find_out_of_order_source_weeks(periods: pd.DataFrame) -> pd.DataFrame:
     """
     Return periods whose source week number breaks chronological order.
@@ -828,21 +907,29 @@ def build_reporting_area_coverage(
     expected_area_count: int = EXPECTED_SOURCE_REPORTING_AREAS,
 ) -> pd.DataFrame:
     """
-    Return rows whose start dates are not on the expected weekday.
+    Return one row per reporting period with its reporting-area count.
 
-    Example expected_weekday values:
-    - "Saturday"
-    - "Sunday"
-    - "Monday"
+    Every period should carry one record per source reporting area. The
+    count is taken over distinct district values so that a duplicated
+    district cannot mask a missing one.
     """
 
-    valid_mask = df["start_date_parsed"].notna()
+    present = df.loc[
+        df["start_date"].notna() & df["end_date"].notna(),
+        ["start_date", "end_date", "district"],
+    ].drop_duplicates()
 
-    actual_weekday = df["start_date_parsed"].dt.day_name()
+    all_areas = set(present["district"].unique())
 
-    invalid_mask = (
-        valid_mask
-        & actual_weekday.ne(expected_weekday)
+    observed = (
+        present.groupby(["start_date", "end_date"])["district"]
+        .agg(
+            reporting_area_count="size",
+            missing_reporting_areas=lambda areas: ", ".join(
+                sorted(all_areas - set(areas))
+            ),
+        )
+        .reset_index()
     )
 
     coverage = periods[
@@ -853,64 +940,83 @@ def build_reporting_area_coverage(
             "start_date",
             "end_date",
         ]
-    ].copy()
+    ].merge(observed, on=["start_date", "end_date"], how="left")
 
-    result["actual_weekday"] = actual_weekday.loc[invalid_mask]
-    result["expected_weekday"] = expected_weekday
-
-    return result
-
-
-def find_non_consecutive_weeks(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Return reporting weeks that are not seven days apart.
-
-    The check is performed once per unique year-week instead of once
-    per district.
-    """
-
-    weekly_dates = (
-        df.loc[
-            df["start_date_parsed"].notna(),
-            [
-                "year",
-                "week",
-                "start_date_parsed",
-            ],
-        ]
-        .drop_duplicates()
-        .sort_values("start_date_parsed")
-        .reset_index(drop=True)
+    coverage["reporting_area_count"] = (
+        coverage["reporting_area_count"].fillna(0).astype(int)
     )
 
-    weekly_dates["previous_start_date"] = (
-        weekly_dates["start_date_parsed"].shift(1)
+    coverage["missing_reporting_areas"] = coverage[
+        "missing_reporting_areas"
+    ].fillna("")
+
+    coverage["expected_reporting_area_count"] = expected_area_count
+
+    coverage["missing_reporting_area_count"] = (
+        expected_area_count - coverage["reporting_area_count"]
     )
 
-    weekly_dates["gap_days"] = (
-        weekly_dates["start_date_parsed"]
-        - weekly_dates["previous_start_date"]
-    ).dt.days
+    coverage["is_complete_source_coverage"] = coverage[
+        "reporting_area_count"
+    ].eq(expected_area_count)
 
-    invalid_mask = (
-        weekly_dates["previous_start_date"].notna()
-        & weekly_dates["gap_days"].ne(7)
-    )
+    return coverage.sort_values("period_id").reset_index(drop=True)
 
-    result = df.loc[
-        invalid_mask,
+
+def find_incomplete_reporting_area_coverage(
+    coverage: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return reporting periods that do not carry every reporting area."""
+
+    return coverage.loc[
+        ~coverage["is_complete_source_coverage"],
         [
-            "year",
-            "week",
-            "previous_start_date",
-            "start_date_parsed",
-            "gap_days",
+            "period_id",
+            "source_year",
+            "source_week",
+            "start_date",
+            "end_date",
+            "reporting_area_count",
+            "expected_reporting_area_count",
+            "missing_reporting_area_count",
+            "missing_reporting_areas",
+            "is_complete_source_coverage",
         ],
     ].copy()
 
-    result["numeric_cases"] = numeric_cases.loc[invalid_mask]
 
-    return result
+def find_non_consecutive_weeks(periods: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return reporting periods whose start dates are not seven days apart.
+
+    The check is performed once per unique reporting period instead of
+    once per district.
+    """
+
+    ordered = periods.sort_values("period_id").copy()
+
+    ordered["previous_start_date"] = ordered["start_date"].shift(1)
+
+    ordered["start_gap_days"] = (
+        ordered["start_date"] - ordered["previous_start_date"]
+    ).dt.days
+
+    invalid_mask = (
+        ordered["previous_start_date"].notna()
+        & ordered["start_gap_days"].ne(EXPECTED_REPORTING_DAYS)
+    )
+
+    return ordered.loc[
+        invalid_mask,
+        [
+            "period_id",
+            "source_year",
+            "source_week",
+            "previous_start_date",
+            "start_date",
+            "start_gap_days",
+        ],
+    ].copy()
 
 
 # ---------------------------------------------------------------------------
@@ -1044,8 +1150,6 @@ def count_unexpected_failures(validation: dict) -> int:
 
     checks = validation["checks"]
 
-    coverage_issues = len(checks["incomplete_reporting_area_coverage"][1])
-
     unexpected = 0
 
     for name, (severity, findings) in checks.items():
@@ -1067,7 +1171,7 @@ def count_unexpected_failures(validation: dict) -> int:
 
             unexpected += len(undocumented)
         elif name == "incomplete_reporting_area_coverage":
-            unexpected += max(coverage_issues - EXPECTED_COVERAGE_ISSUES, 0)
+            unexpected += max(len(findings) - EXPECTED_COVERAGE_ISSUES, 0)
         else:
             unexpected += len(findings)
 
@@ -1146,12 +1250,63 @@ def print_validation_summary(validation: dict) -> None:
         if status == PASS:
             print(f"{PASS:<8} {name}")
         else:
-            print(f"FAIL: {check_name} — {issue_count} issue(s)")
+            print(f"{status:<8} {name} - {count} finding(s)")
+
+
+def write_validation_outputs(validation: dict) -> None:
+    """Write the summary table and the supporting reference CSVs."""
+
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    summary = build_summary_table(validation)
+
+    SUMMARY_PATH.write_text(
+        "# Dengue validation summary\n\n"
+        + summary.to_markdown(index=False)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    validation["checks"]["irregular_reporting_periods"][1].to_csv(
+        IRREGULAR_PERIODS_PATH, index=False
+    )
+
+    validation["known_calendar_gaps"].to_csv(KNOWN_GAPS_PATH, index=False)
+
+    validation["weekday_conventions"].to_csv(
+        WEEKDAY_CONVENTIONS_PATH, index=False
+    )
+
+    validation["checks"]["incomplete_reporting_area_coverage"][1].to_csv(
+        COVERAGE_ISSUES_PATH, index=False
+    )
+
+
+def main() -> int:
+    """
+    Validate the raw weekly dengue data.
+
+    Returns a process exit code. Documented source defects are reported but
+    do not fail the build; anything beyond them is a regression and does.
+    """
+
+    df = pd.read_csv(RAW_PATH)
+
+    validation = validate_weekly_dengue_data(df)
+
+    print_validation_summary(validation)
+
+    write_validation_outputs(validation)
+
+    unexpected = count_unexpected_failures(validation)
+
+    if unexpected:
+        print(f"\n{unexpected} undocumented validation failure(s).")
+        return 1
+
+    print("\nNo undocumented validation failures.")
+    return 0
+
 
 if __name__ == "__main__":
-    
-    df = pd.read_csv(RAW_DATA_DIR / "srilanka_weekly_data.csv")
-    
-    print_validation_summary(
-        validate_weekly_dengue_data(df)
-    )
+    raise SystemExit(main())
