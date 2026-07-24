@@ -1,0 +1,2 @@
+previous_period_start,previous_period_end,next_period_start,next_period_end,gap_start,gap_end,gap_days,reason
+2025-12-20,2025-12-26,2025-12-29,2026-01-04,2025-12-27,2025-12-28,2,"Seam between the Saturday and Monday reporting conventions. 2025-12-27 and 2025-12-28 are not covered by any reporting period in the source. Carried as an unobserved interval, never interpolated."
