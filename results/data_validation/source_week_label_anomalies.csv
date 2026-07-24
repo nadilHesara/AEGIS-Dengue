@@ -1,0 +1,2 @@
+period_id,source_year,source_week,start_date,end_date,anomaly_type,description,recommended_handling
+992,2026,53,2025-12-20,2025-12-26,chronologically_misplaced_label,Source label 2026 week 53 sorts differently from the actual interval 2025-12-20 to 2025-12-26.,"Retain the source label unchanged as metadata. Use start_date, end_date and period_id for all chronological operations."
