@@ -29,6 +29,7 @@ jobs:
                 python scripts/1.dataset_validate.py
                 python scripts/2.create_calendar.py
                 python scripts/3.create_nodes.py
+                python scripts/4.create_canonical_dengue.py
 
             - name: Check tests
               run: |
