@@ -12,9 +12,10 @@ duplicate or conflicting records.
 Outputs:
     results/data_validation/dengue_validation_summary.md
     results/data_validation/irregular_reporting_periods.csv
-    results/data_validation/known_calendar_gaps.csv
     results/data_validation/weekday_conventions.csv
-    results/data_validation/incomplete_reporting_area_coverage.csv
+
+The known-gaps and incomplete-coverage tables report the same two documented
+defects keyed by period_id, so they are written by 2.create_calendar.py.
 """
 
 from pathlib import Path
@@ -31,9 +32,7 @@ RAW_PATH = RAW_DATA_DIR / "srilanka_weekly_data.csv"
 
 SUMMARY_PATH = RESULTS_DIR / "dengue_validation_summary.md"
 IRREGULAR_PERIODS_PATH = RESULTS_DIR / "irregular_reporting_periods.csv"
-KNOWN_GAPS_PATH = RESULTS_DIR / "known_calendar_gaps.csv"
 WEEKDAY_CONVENTIONS_PATH = RESULTS_DIR / "weekday_conventions.csv"
-COVERAGE_ISSUES_PATH = RESULTS_DIR / "incomplete_reporting_area_coverage.csv"
 
 DATE_FORMAT = "%m/%d/%Y"
 
@@ -1271,15 +1270,13 @@ def write_validation_outputs(validation: dict) -> None:
         IRREGULAR_PERIODS_PATH, index=False
     )
 
-    validation["known_calendar_gaps"].to_csv(KNOWN_GAPS_PATH, index=False)
-
     validation["weekday_conventions"].to_csv(
         WEEKDAY_CONVENTIONS_PATH, index=False
     )
 
-    validation["checks"]["incomplete_reporting_area_coverage"][1].to_csv(
-        COVERAGE_ISSUES_PATH, index=False
-    )
+    # known_calendar_gaps.csv and incomplete_reporting_area_coverage.csv are
+    # written by 2.create_calendar.py, which reports the same two documented
+    # defects against period_id. The checks stay here; only the files moved.
 
 
 def main() -> int:
