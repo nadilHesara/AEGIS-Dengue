@@ -14,6 +14,14 @@ import pytest
 
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+REAL_DATA_FILES = [
+    PROJECT_ROOT / "data" / "interim" / "reporting_calendar.csv",
+    PROJECT_ROOT / "data" / "processed" / "nodes.csv",
+    PROJECT_ROOT / "data" / "interim" / "dengue_weekly_canonical.parquet",
+    PROJECT_ROOT / "data" / "interim" / "climate_by_dengue_period.parquet",
+]
 
 spec = importlib.util.spec_from_file_location(
     "master_panel",
@@ -226,6 +234,11 @@ def test_missing_puttalam_is_retained_as_missing_case():
 # ---------------------------------------------------------------------------
 # Real data
 # ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    not all(path.exists() for path in REAL_DATA_FILES),
+    reason="Full generated datasets are not available in CI",
+)
 
 def test_real_inputs_build_a_complete_structural_panel(calendar, nodes, dengue, climate):
     panel = master.build_master_panel(calendar, nodes, dengue, climate)
