@@ -244,6 +244,63 @@ def combine_chunks(start: date, end: date) -> pd.DataFrame:
 
     return combined.sort_values(["date", "node_id"]).reset_index(drop=True)
 
+def finalise_chunk(frame: pd.DataFrame) -> pd.DataFrame:
+    """Add CHIRPS observation and provenance fields without filling missing rain."""
+
+    if frame.empty:
+        return pd.DataFrame(
+            columns=[
+                "date",
+                "node_id",
+                "canonical_name",
+                "rainfall_mm_chirps",
+                "rainfall_observed",
+                "data_source",
+                "extraction_version",
+            ]
+        )
+
+    result = frame.copy()
+
+    result["node_id"] = pd.to_numeric(
+        result["node_id"],
+        errors="raise",
+    ).astype("Int64")
+
+    result["rainfall_mm_chirps"] = pd.to_numeric(
+        result["rainfall_mm_chirps"],
+        errors="coerce",
+    )
+
+    observed = result["rainfall_mm_chirps"].notna()
+
+    result["rainfall_observed"] = observed.astype(int)
+
+    # Keep unobserved rainfall as null. Never replace it with zero.
+    result.loc[~observed, "rainfall_mm_chirps"] = pd.NA
+
+    # Only clamp tiny negative floating-point artefacts for observed values.
+    result.loc[observed, "rainfall_mm_chirps"] = (
+        result.loc[observed, "rainfall_mm_chirps"].clip(lower=0)
+    )
+
+    result["data_source"] = "CHIRPS Daily via Google Earth Engine"
+    result["extraction_version"] = "chirps-v1"
+
+    return result[
+        [
+            "date",
+            "node_id",
+            "canonical_name",
+            "rainfall_mm_chirps",
+            "rainfall_observed",
+            "data_source",
+            "extraction_version",
+        ]
+    ].sort_values(
+        ["date", "node_id"]
+    ).reset_index(drop=True)
+
 
 # ---------------------------------------------------------------------------
 # Validation
