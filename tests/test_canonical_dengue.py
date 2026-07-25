@@ -90,6 +90,8 @@ def build(raw, calendar, nodes=None):
     nodes = make_nodes() if nodes is None else nodes
 
     raw = raw.copy()
+    raw["source_year"] = raw["year"]
+    raw["source_week"] = raw["week"]
     raw["start_date"] = pd.to_datetime(raw["start.date"], format="%m/%d/%Y")
     raw["end_date"] = pd.to_datetime(raw["end.date"], format="%m/%d/%Y")
     raw["district"] = raw["district"].astype(str).str.strip()
@@ -499,6 +501,23 @@ def test_join_uses_dates_not_only_labels():
 
     with pytest.raises(ValueError, match="match no reporting period"):
         canonical_module.join_reporting_calendar(df, calendar)
+
+
+def test_join_uses_source_year_and_week_labels():
+    """The explicit source_year and source_week fields drive the match."""
+
+    df = make_period(2015, 99, "3/7/2015", "3/13/2015")
+
+    df["source_year"] = 2015
+    df["source_week"] = 10
+    df["start_date"] = pd.to_datetime(df["start.date"], format="%m/%d/%Y")
+    df["end_date"] = pd.to_datetime(df["end.date"], format="%m/%d/%Y")
+
+    calendar = make_calendar((2015, 10, "2015-03-07", "2015-03-13"))
+
+    rows = canonical_module.join_reporting_calendar(df, calendar)
+
+    assert rows["period_id"].eq(1).all()
 
 
 # ---------------------------------------------------------------------------
