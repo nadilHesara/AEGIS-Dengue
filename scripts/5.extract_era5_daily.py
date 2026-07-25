@@ -115,7 +115,7 @@ EXPORT_GRANULARITY_CHOICES = ("year", "month")
 # whenever both are importable.
 # ---------------------------------------------------------------------------
 
-GADM_TO_CANONICAL = {
+BOUNDARY_TO_CANONICAL = {
     "Ampara District": "Ampara",
     "Anuradhapura District": "Anuradhapura",
     "Badulla District": "Badulla",
@@ -314,7 +314,7 @@ def load_district_polygons(ee, nodes: pd.DataFrame):
     verify_district_mapping(gadm_names, nodes)
 
     lookup = {
-        source_name: GADM_TO_CANONICAL[source_name]
+        source_name: BOUNDARY_TO_CANONICAL[source_name]
         for source_name in gadm_names
     }
 
@@ -347,7 +347,7 @@ def verify_district_mapping(gadm_names: list[str], nodes: pd.DataFrame) -> None:
     districts, with one polygon, one node_id and one canonical name each.
     """
 
-    unmapped = sorted(set(gadm_names) - set(GADM_TO_CANONICAL))
+    unmapped = sorted(set(gadm_names) - set(BOUNDARY_TO_CANONICAL))
 
     if unmapped:
         raise ValueError(
@@ -356,7 +356,7 @@ def verify_district_mapping(gadm_names: list[str], nodes: pd.DataFrame) -> None:
             "similarity."
         )
 
-    obsolete = sorted(set(GADM_TO_CANONICAL) - set(gadm_names))
+    obsolete = sorted(set(BOUNDARY_TO_CANONICAL) - set(gadm_names))
 
     if obsolete:
         raise ValueError(
@@ -367,7 +367,7 @@ def verify_district_mapping(gadm_names: list[str], nodes: pd.DataFrame) -> None:
     if len(gadm_names) != len(set(gadm_names)):
         raise ValueError("A GADM district name appears on two polygons.")
 
-    canonical_names = [GADM_TO_CANONICAL[name] for name in gadm_names]
+    canonical_names = [BOUNDARY_TO_CANONICAL[name] for name in gadm_names]
 
     if len(canonical_names) != len(set(canonical_names)):
         duplicated = sorted(
@@ -406,10 +406,13 @@ def verify_district_mapping(gadm_names: list[str], nodes: pd.DataFrame) -> None:
     except Exception:
         return
 
-    if module.GADM_TO_CANONICAL != GADM_TO_CANONICAL:
+    node_canonical = set(nodes["canonical_name"])
+    weather_canonical = set(BOUNDARY_TO_CANONICAL.values())
+
+    if node_canonical != weather_canonical:
         raise ValueError(
-            "GADM_TO_CANONICAL here disagrees with 3.create_nodes.py. "
-            "Update both together."
+            "Node registry and weather boundary mapping have different "
+            "canonical districts."
         )
 
 
