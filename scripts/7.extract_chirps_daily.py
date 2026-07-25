@@ -1,31 +1,14 @@
 """
 Extract daily CHIRPS rainfall for the 25 canonical Sri Lankan districts.
 
-Optional. CHIRPS is a second, independent rainfall estimate used to
-cross-check ERA5-Land. It is never a silent replacement: the ERA5 extraction
-and the canonical dengue dataset are unaffected by whether this script runs.
+CHIRPS is a second, independent rainfall estimate used to cross-check
+ERA5-Land. The district polygons, node registry, date range and aggregation
+scale are shared with scripts/5.extract_era5_daily.py so the two rainfall
+series stay directly comparable.
 
-CHIRPS (Climate Hazards Group InfraRed Precipitation with Station data) is
-gauge-calibrated and satellite-derived, at 0.05 degrees. That is roughly five
-times finer than ERA5-Land and calibrated against rain gauges rather than
-modelled by a reanalysis, so it is a genuinely independent view of the same
-quantity. Where the two agree, confidence in the rainfall signal rises; where
-they disagree, the disagreement itself is informative.
-
-The district polygons, node ordering, date range and aggregation method are
-taken from scripts/5.extract_era5_daily.py so that the two rainfall series
-are directly comparable. Any difference between them is then a property of
-the rainfall products, not of the extraction.
-
-Authentication (once per machine):
-
-    earthengine authenticate
-
-Usage:
-
-    python scripts/7.extract_chirps_daily.py
-    python scripts/7.extract_chirps_daily.py --start 2010-01-01 --end 2010-12-31
-    python scripts/7.extract_chirps_daily.py --dry-run
+This version avoids synchronous yearly getInfo() calls. Instead it queues one
+Earth Engine table export per year, or per month when monthly chunking is
+requested, and leaves the CSV download/combination step to the user.
 
 Outputs:
     data/raw/chirps_daily_rainfall.csv
@@ -36,10 +19,11 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import calendar as calendar_lib
 import importlib.util
 import json
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -55,9 +39,6 @@ RESULTS_DIR = PROJECT_DIR / "results" / "climate" / "era5_chirps"
 MANIFEST_PATH = RESULTS_DIR / "chirps_extraction_manifest.json"
 
 
-# CHIRPS daily, version 2.0, final product. Native resolution 0.05 degrees.
-# The band is already millimetres per day, so no unit conversion is applied;
-# this is asserted rather than assumed, in check_units below.
 CHIRPS_ASSET = "UCSB-CHG/CHIRPS/DAILY"
 CHIRPS_BAND = "precipitation"
 CHIRPS_NATIVE_UNITS = "mm/day"
@@ -65,13 +46,10 @@ CHIRPS_NATIVE_UNITS = "mm/day"
 EXTRACTION_VERSION = "chirps-v2.0-final-v1"
 DATA_SOURCE = "CHIRPS Daily v2.0 (UCSB-CHG/CHIRPS/DAILY) via Google Earth Engine"
 
-# CHIRPS begins in 1981, comfortably before the ERA5 window, so the shared
-# date range is never truncated at the start.
 CHIRPS_FIRST_DATE = date(1981, 1, 1)
-
-# CHIRPS final has a longer latency than ERA5-Land: roughly 1-2 months after
-# month end. The preliminary product is faster but is revised.
 CHIRPS_LATENCY_DAYS = 60
+DEFAULT_EXPORT_FOLDER = "chirps_chunks"
+EXPORT_GRANULARITY_CHOICES = ("year", "month")
 
 OUTPUT_COLUMNS = [
     "date",
@@ -85,14 +63,7 @@ OUTPUT_COLUMNS = [
 
 
 def _load_era5_module():
-    """
-    Load the ERA5 extraction module for its shared helpers.
-
-    Reusing load_nodes, load_district_polygons and resolve_date_range is what
-    guarantees the two rainfall series describe identical districts over an
-    identical window. Restating them here would let the two drift apart, and
-    a drifted comparison is worse than no comparison.
-    """
+    """Load the ERA5 module for shared nodes, polygons and date logic."""
 
     path = PROJECT_DIR / "scripts" / "5.extract_era5_daily.py"
 
@@ -110,18 +81,11 @@ AGGREGATION_SCALE_M = era5.AGGREGATION_SCALE_M
 
 
 # ---------------------------------------------------------------------------
-# Extraction
+# Extraction helpers
 # ---------------------------------------------------------------------------
 
 def build_daily_rainfall_image(ee, day):
-    """
-    Return one day of CHIRPS rainfall.
-
-    CHIRPS daily is a single image per day already expressed in millimetres
-    per day, so no accumulation differencing and no unit conversion are
-    needed. This is the key difference from ERA5-Land, whose total
-    precipitation is a running accumulation that must be handled carefully.
-    """
+    """Return one day of CHIRPS rainfall."""
 
     day = ee.Date(day)
 
@@ -137,27 +101,14 @@ def build_daily_rainfall_image(ee, day):
     )
 
 
-def extract_year(ee, polygons, year: int, start: date, end: date):
-    """
-    Extract one year of daily district rainfall.
+def build_export_collection(ee, polygons, window_start: date, window_end: date):
+    """Build one FeatureCollection covering a closed date window."""
 
-    The reduction runs at the same scale as the ERA5 extraction so that the
-    two series are aggregated identically over identical polygons.
-    """
+    start_day = ee.Date(window_start.isoformat())
+    day_count = (window_end - window_start).days
 
-    year_start = max(start, date(year, 1, 1))
-    year_end = min(end, date(year, 12, 31))
-
-    if year_start > year_end:
-        return pd.DataFrame(columns=OUTPUT_COLUMNS)
-
-    day_count = (year_end - year_start).days + 1
-
-    days = ee.List.sequence(0, day_count - 1).map(
-        lambda offset: ee.Date(str(year_start)).advance(offset, "day")
-    )
-
-    def _reduce_day(day):
+    def _one_day(offset):
+        day = start_day.advance(ee.Number(offset), "day")
         image = build_daily_rainfall_image(ee, day)
 
         reduced = image.reduceRegions(
@@ -168,84 +119,116 @@ def extract_year(ee, polygons, year: int, start: date, end: date):
 
         return reduced.map(
             lambda feature: feature.set(
-                "date", ee.Date(day).format("YYYY-MM-dd")
+                {
+                    "date": day.format("YYYY-MM-dd"),
+                    "rainfall_mm_chirps": feature.get("mean"),
+                    "rainfall_observed": 1,
+                    "data_source": DATA_SOURCE,
+                    "extraction_version": EXTRACTION_VERSION,
+                }
             )
         )
 
-    collection = ee.FeatureCollection(days.map(_reduce_day)).flatten()
-
-    properties = ["date", "node_id", "canonical_name", "mean"]
-
-    try:
-        records = collection.select(properties, retainGeometry=False).getInfo()
-    except Exception as error:
-        raise RuntimeError(
-            "Earth Engine could not return this chunk in one request. "
-            "Narrow the range with --start and --end.\n"
-            f"Underlying error: {error}"
-        ) from error
-
-    rows = [feature["properties"] for feature in records.get("features", [])]
-
-    frame = pd.DataFrame(rows)
-
-    if frame.empty:
-        return pd.DataFrame(columns=OUTPUT_COLUMNS)
-
-    # reduceRegions names the single-band result "mean".
-    if "mean" in frame.columns:
-        frame = frame.rename(columns={"mean": "rainfall_mm_chirps"})
-
-    return frame
+    return ee.FeatureCollection(
+        ee.List.sequence(0, day_count).map(_one_day)
+    ).flatten()
 
 
-def finalise_chunk(frame: pd.DataFrame) -> pd.DataFrame:
-    """Add provenance and the observation flag."""
+def iter_export_windows(start: date, end: date, granularity: str):
+    """Yield the export windows that should become separate Drive tasks."""
 
-    if frame.empty:
-        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+    current_start = start
 
-    result = frame.copy()
+    while current_start <= end:
+        if granularity == "month":
+            last_day = calendar_lib.monthrange(
+                current_start.year, current_start.month
+            )[1]
+            current_end = min(
+                date(current_start.year, current_start.month, last_day), end
+            )
+            label = f"{current_start.year}_{current_start.month:02d}"
+        else:
+            current_end = min(date(current_start.year, 12, 31), end)
+            label = f"{current_start.year}"
 
-    if "rainfall_mm_chirps" not in result.columns:
-        result["rainfall_mm_chirps"] = pd.NA
+        yield label, current_start, current_end
 
-    result["node_id"] = pd.to_numeric(
-        result["node_id"], errors="coerce"
-    ).astype("Int64")
-
-    observed = result["rainfall_mm_chirps"].notna()
-
-    result["rainfall_observed"] = observed.astype(int)
-
-    # Absence stays absence. A missing rainfall estimate is never zero: zero
-    # asserts a dry day that was not observed.
-    result.loc[~observed, "rainfall_mm_chirps"] = pd.NA
-
-    result["data_source"] = DATA_SOURCE
-    result["extraction_version"] = EXTRACTION_VERSION
-
-    return result[OUTPUT_COLUMNS].sort_values(
-        ["date", "node_id"]
-    ).reset_index(drop=True)
+        current_start = current_end + timedelta(days=1)
 
 
-def chunk_path(year: int) -> Path:
-    """Return the file holding one year of extracted rainfall."""
+def export_task_name(label: str) -> str:
+    """Return the stable export file prefix used by the Drive task."""
 
-    return CHUNK_DIR / f"chirps_daily_{year}.csv"
+    return f"chirps_daily_{label}"
+
+
+def submit_export_task(ee, collection, export_folder: str, label: str):
+    """Queue one Earth Engine table export and print its task details."""
+
+    export_name = export_task_name(label)
+
+    task = ee.batch.Export.table.toDrive(
+        collection=collection.select(OUTPUT_COLUMNS, retainGeometry=False),
+        description=export_name,
+        folder=export_folder,
+        fileNamePrefix=export_name,
+        fileFormat="CSV",
+        selectors=OUTPUT_COLUMNS,
+    )
+
+    task.start()
+
+    status = task.status()
+
+    print(
+        f"  submitted {status.get('id')} | {status.get('description')} | "
+        f"{status.get('state')}"
+    )
+
+    return task
+
+
+def print_task_list(ee, prefix: str = "chirps_daily_") -> None:
+    """Print queued Earth Engine tasks, filtered to this pipeline when possible."""
+
+    tasks = []
+
+    for task in ee.batch.Task.list():
+        status = task.status()
+        description = status.get("description", "")
+
+        if prefix and not description.startswith(prefix):
+            continue
+
+        tasks.append(status)
+
+    tasks.sort(
+        key=lambda item: (item.get("state", ""), item.get("description", ""))
+    )
+
+    print("\nEarth Engine tasks")
+    print("-" * 62)
+
+    if not tasks:
+        print("No matching tasks found.")
+        return
+
+    for status in tasks:
+        print(
+            f"{status.get('state', 'UNKNOWN'):<12} "
+            f"{status.get('id', '<no id>')} "
+            f"{status.get('description', '<no description>')}"
+        )
 
 
 def combine_chunks(start: date, end: date) -> pd.DataFrame:
-    """Combine the yearly chunks into one frame."""
+    """Combine downloaded CHIRPS chunks into one frame."""
 
     frames = []
 
-    for year in range(start.year, end.year + 1):
-        path = chunk_path(year)
-
-        if path.exists():
-            frames.append(pd.read_csv(path))
+    for path in sorted(CHUNK_DIR.glob("chirps_daily_*.csv")):
+        frames.append(pd.read_csv(path))
 
     if not frames:
         raise FileNotFoundError(
@@ -253,8 +236,11 @@ def combine_chunks(start: date, end: date) -> pd.DataFrame:
         )
 
     combined = pd.concat(frames, ignore_index=True)
+    combined["date"] = pd.to_datetime(combined["date"], errors="coerce")
 
-    combined = combined.loc[combined["date"].between(str(start), str(end))]
+    combined = combined.loc[
+        combined["date"].between(pd.Timestamp(start), pd.Timestamp(end))
+    ]
 
     return combined.sort_values(["date", "node_id"]).reset_index(drop=True)
 
@@ -264,33 +250,23 @@ def combine_chunks(start: date, end: date) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def check_units(frame: pd.DataFrame) -> list[str]:
-    """
-    Confirm the rainfall values are millimetres per day.
-
-    CHIRPS is published in mm/day, but that is asserted here rather than
-    trusted. A maximum below 1 would indicate metres; a median in the
-    hundreds would indicate an accumulation rather than a daily rate.
-    """
+    """Confirm the rainfall values are millimetres per day."""
 
     findings = []
 
-    values = pd.to_numeric(
-        frame["rainfall_mm_chirps"], errors="coerce"
-    ).dropna()
+    values = pd.to_numeric(frame["rainfall_mm_chirps"], errors="coerce").dropna()
 
     if values.empty:
         return ["no rainfall values to check units against"]
 
     if values.max() < 1.0:
         findings.append(
-            f"maximum rainfall {values.max():.6f} is below 1 mm, which "
-            "suggests metres rather than millimetres"
+            f"maximum rainfall {values.max():.6f} is below 1 mm, which suggests metres rather than millimetres"
         )
 
     if values.median() > 100:
         findings.append(
-            f"median rainfall {values.median():.2f} mm/day is implausibly "
-            "high, which suggests an accumulation rather than a daily rate"
+            f"median rainfall {values.median():.2f} mm/day is implausibly high, which suggests an accumulation rather than a daily rate"
         )
 
     if (values < 0).any():
@@ -341,8 +317,7 @@ def validate_extraction(
 
     if district_count != EXPECTED_DISTRICTS:
         findings.append(
-            f"{district_count} districts present, expected "
-            f"{EXPECTED_DISTRICTS}."
+            f"{district_count} districts present, expected {EXPECTED_DISTRICTS}."
         )
 
     registry_names = set(nodes["canonical_name"])
@@ -391,7 +366,7 @@ def validate_extraction(
     }
 
 
-def write_manifest(summary: dict, start: date, end: date) -> None:
+def write_manifest(summary: dict, start: date, end: date, source_level: str) -> None:
     """Record the assets and settings that produced this extraction."""
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -403,7 +378,8 @@ def write_manifest(summary: dict, start: date, end: date) -> None:
         "earth_engine_assets": {
             "chirps": CHIRPS_ASSET,
             "chirps_band": CHIRPS_BAND,
-            "gadm_level1": era5.GADM_LEVEL1_ASSET,
+            "district_boundaries": era5.DISTRICT_BOUNDARY_ASSET,
+            "boundary_source_used": source_level,
         },
         "settings": {
             "native_units": CHIRPS_NATIVE_UNITS,
@@ -436,36 +412,77 @@ def parse_arguments():
     parser.add_argument("--project", help="Earth Engine Cloud project id.")
 
     parser.add_argument(
+        "--submit-exports",
+        action="store_true",
+        help="Queue Earth Engine table exports instead of waiting for daily getInfo calls.",
+    )
+
+    parser.add_argument(
+        "--export-folder",
+        default=DEFAULT_EXPORT_FOLDER,
+        help="Google Drive folder for submitted export tasks.",
+    )
+
+    parser.add_argument(
+        "--export-granularity",
+        choices=EXPORT_GRANULARITY_CHOICES,
+        default="year",
+        help="Submit one export per year, or per month if yearly exports are too large.",
+    )
+
+    parser.add_argument(
+        "--check-tasks",
+        action="store_true",
+        help="List queued Earth Engine tasks and exit.",
+    )
+
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Report the plan and check local inputs without extracting.",
     )
 
     parser.add_argument(
-        "--overwrite",
+        "--validate-only",
         action="store_true",
-        help="Re-extract years whose chunk file already exists.",
+        help="Re-validate the existing combined CSV without contacting Earth Engine.",
     )
 
     return parser.parse_args()
 
 
 def main() -> int:
-    """Extract, combine and validate the daily district CHIRPS rainfall."""
+    """Queue, combine and validate the daily district CHIRPS rainfall."""
 
     arguments = parse_arguments()
+
+    if arguments.check_tasks:
+        ee = era5.initialise_earth_engine(arguments.project)
+        print_task_list(ee)
+        return 0
 
     nodes = era5.load_nodes()
 
     print(f"Node registry:   {len(nodes)} districts, node_id 0-24")
 
+    if arguments.validate_only:
+        if not OUTPUT_PATH.exists():
+            raise SystemExit(f"{OUTPUT_PATH} does not exist.")
+
+        frame = pd.read_csv(OUTPUT_PATH)
+        dates = pd.to_datetime(frame["date"])
+
+        validate_extraction(
+            frame, nodes, dates.min().date(), dates.max().date()
+        )
+
+        return 0
+
     start, end = era5.resolve_date_range(arguments.start, arguments.end)
 
-    # CHIRPS begins in 1981 and trails real time more than ERA5-Land does.
     if start < CHIRPS_FIRST_DATE:
         print(
-            f"NOTE: CHIRPS begins {CHIRPS_FIRST_DATE}; "
-            f"start moved from {start}."
+            f"NOTE: CHIRPS begins {CHIRPS_FIRST_DATE}; start moved from {start}."
         )
         start = CHIRPS_FIRST_DATE
 
@@ -476,16 +493,19 @@ def main() -> int:
 
     if end > chirps_latest:
         print(
-            f"NOTE: CHIRPS final trails roughly {CHIRPS_LATENCY_DAYS} days; "
-            f"end moved from {end} to {chirps_latest}."
+            f"NOTE: CHIRPS final trails roughly {CHIRPS_LATENCY_DAYS} days; end moved from {end} to {chirps_latest}."
         )
         end = chirps_latest
 
-    years = list(range(start.year, end.year + 1))
+    export_windows = list(
+        iter_export_windows(start, end, arguments.export_granularity)
+    )
 
     print(f"Date range:      {start} to {end}")
     print(f"Expected rows:   {((end - start).days + 1) * EXPECTED_DISTRICTS}")
-    print(f"Yearly chunks:   {len(years)}")
+    print(
+        f"Export windows:  {len(export_windows)} ({arguments.export_granularity})"
+    )
     print(f"CHIRPS asset:    {CHIRPS_ASSET}")
     print(f"Native units:    {CHIRPS_NATIVE_UNITS} (no conversion applied)")
 
@@ -500,32 +520,34 @@ def main() -> int:
     print(f"Boundaries:      {source_level}, {EXPECTED_DISTRICTS} polygons")
     print("Using the same polygons and scale as the ERA5 extraction.\n")
 
-    CHUNK_DIR.mkdir(parents=True, exist_ok=True)
+    if not arguments.submit_exports:
+        print(
+            "\nNOTE: this script now queues Earth Engine exports instead of pulling each day back with getInfo(). Use --submit-exports to make the intent explicit."
+        )
 
-    for year in years:
-        path = chunk_path(year)
+    print(
+        f"Submitting {arguments.export_granularity} exports to Drive folder {arguments.export_folder!r}..."
+    )
 
-        if path.exists() and not arguments.overwrite:
-            print(f"  {year}: already extracted, skipping")
-            continue
+    submitted = 0
 
-        print(f"  {year}: extracting...", end=" ", flush=True)
+    for label, window_start, window_end in export_windows:
+        print(f"  {label}: {window_start} to {window_end}")
+        collection = build_export_collection(
+            ee, polygons, window_start, window_end
+        )
+        submit_export_task(
+            ee,
+            collection,
+            arguments.export_folder,
+            label,
+        )
+        submitted += 1
 
-        frame = finalise_chunk(extract_year(ee, polygons, year, start, end))
-
-        frame.to_csv(path, index=False)
-
-        print(f"{len(frame)} rows")
-
-    combined = combine_chunks(start, end)
-
-    combined.to_csv(OUTPUT_PATH, index=False)
-
-    print(f"\nWrote {OUTPUT_PATH.relative_to(PROJECT_DIR)}")
-
-    summary = validate_extraction(combined, nodes, start, end)
-
-    write_manifest(summary, start, end)
+    print(f"\nSubmitted {submitted} Earth Engine export task(s).")
+    print(
+        "Download the CSV files into data/raw/chirps_chunks/ and rerun the script with --validate-only after combining them into data/raw/chirps_daily_rainfall.csv."
+    )
 
     return 0
 
