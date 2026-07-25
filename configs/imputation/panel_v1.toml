@@ -1,0 +1,22 @@
+version = "data-v1"
+selected_method = "district_month_climatology"
+train_source_year_end = 2023
+validation_source_year_start = 2024
+test_source_year_start = 2025
+forward_fill_max_gap_periods = 2
+comparison_holdout_fraction = 0.15
+comparison_random_seed = 42
+
+[seasonal_climatology]
+12 = "northeast_monsoon"
+1 = "northeast_monsoon"
+2 = "northeast_monsoon"
+3 = "first_intermonsoon"
+4 = "first_intermonsoon"
+5 = "southwest_monsoon"
+6 = "southwest_monsoon"
+7 = "southwest_monsoon"
+8 = "southwest_monsoon"
+9 = "southwest_monsoon"
+10 = "second_intermonsoon"
+11 = "second_intermonsoon"
