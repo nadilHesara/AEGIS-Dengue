@@ -21,10 +21,13 @@ Usage:
     python scripts/5.extract_era5_daily.py --start 2010-01-01 --end 2010-12-31
     python scripts/5.extract_era5_daily.py --validate-only  # re-check the CSV
     python scripts/5.extract_era5_daily.py --dry-run        # no GEE calls
+    python scripts/5.extract_era5_daily.py --submit-exports  # queue Drive exports
+    python scripts/5.extract_era5_daily.py --check-tasks     # list Earth Engine tasks
 
-Yearly chunks are written to data/raw/era5_chunks/ and combined into
-data/raw/climate_daily_district.csv. Completed chunks are skipped on re-run, so
-an interrupted extraction resumes rather than restarting.
+Queued exports are written to Google Drive as CSV files named
+climate_daily_<year> (or climate_daily_<year>_<month> if monthly exports are
+requested). After downloading those files into data/raw/era5_chunks/, they can
+be combined into data/raw/climate_daily_district.csv.
 
 Outputs:
     data/raw/climate_daily_district.csv
@@ -35,9 +38,10 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import calendar as calendar_lib
 import json
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -66,12 +70,8 @@ MANIFEST_PATH = RESULTS_DIR / "era5_extraction_manifest.json"
 
 ERA5_ASSET = "ECMWF/ERA5_LAND/HOURLY"
 
-# GADM level 1 is the 25 districts for Sri Lanka and is the primary source.
-# Level 2 is 323 DS divisions nested under the same 25 districts; dissolving it
-# on ADM1_NAME yields the identical district set. Both are verified to produce
-# 25 polygons before use.
-GADM_LEVEL1_ASSET = "projects/sat-io/open-datasets/gadm/gadm41_L1"
-GADM_LEVEL2_ASSET = "projects/sat-io/open-datasets/gadm/gadm41_L2"
+# geoBoundaries ADM2 corresponds to Sri Lanka's 25 districts.
+DISTRICT_BOUNDARY_ASSET = "WM/geoLab/geoBoundaries/600/ADM2"
 
 # Static land-sea mask. Ocean pixels must not enter a district mean: most Sri
 # Lankan districts are coastal, and sea surface conditions differ
@@ -98,6 +98,8 @@ HISTORY_WEEKS = 52
 EXPECTED_DISTRICTS = 25
 
 BATCH_DISTRICTS = 25
+DEFAULT_EXPORT_FOLDER = "era5_chunks"
+EXPORT_GRANULARITY_CHOICES = ("year", "month")
 
 
 # ---------------------------------------------------------------------------
@@ -113,32 +115,32 @@ BATCH_DISTRICTS = 25
 # whenever both are importable.
 # ---------------------------------------------------------------------------
 
-GADM_TO_CANONICAL = {
-    "Ampara": "Ampara",
-    "Anuradhapura": "Anuradhapura",
-    "Badulla": "Badulla",
-    "Batticaloa": "Batticaloa",
-    "Colombo": "Colombo",
-    "Galle": "Galle",
-    "Gampaha": "Gampaha",
-    "Hambantota": "Hambantota",
-    "Jaffna": "Jaffna",
-    "Kalutara": "Kalutara",
-    "Kandy": "Kandy",
-    "Kegalle": "Kegalle",
-    "Kilinochchi": "Kilinochchi",
-    "Kurunegala": "Kurunegala",
-    "Mannar": "Mannar",
-    "Matale": "Matale",
-    "Matara": "Matara",
-    "Moneragala": "Moneragala",
-    "Mullaitivu": "Mullaitivu",
-    "NuwaraEliya": "Nuwara Eliya",
-    "Polonnaruwa": "Polonnaruwa",
-    "Puttalam": "Puttalam",
-    "Ratnapura": "Ratnapura",
-    "Trincomalee": "Trincomalee",
-    "Vavuniya": "Vavuniya",
+BOUNDARY_TO_CANONICAL = {
+    "Ampara District": "Ampara",
+    "Anuradhapura District": "Anuradhapura",
+    "Badulla District": "Badulla",
+    "Batticaloa District": "Batticaloa",
+    "Colombo District": "Colombo",
+    "Galle District": "Galle",
+    "Gampaha District": "Gampaha",
+    "Hambantota District": "Hambantota",
+    "Jaffna District": "Jaffna",
+    "Kalutara District": "Kalutara",
+    "Kandy District": "Kandy",
+    "Kegalle District": "Kegalle",
+    "Kilinochchi District": "Kilinochchi",
+    "Kurunegala District": "Kurunegala",
+    "Mannar District": "Mannar",
+    "Matale District": "Matale",
+    "Matara District": "Matara",
+    "Monaragala District": "Moneragala",
+    "Mullaitivu District": "Mullaitivu",
+    "Nuwara Eliya District": "Nuwara Eliya",
+    "Polonnaruwa District": "Polonnaruwa",
+    "Puttalam District": "Puttalam",
+    "Ratnapura District": "Ratnapura",
+    "Trincomalee District": "Trincomalee",
+    "Vavuniya District": "Vavuniya",
 }
 
 OUTPUT_COLUMNS = [
@@ -277,60 +279,43 @@ def initialise_earth_engine(project: str | None = None):
     return ee
 
 
-def load_district_polygons(ee, nodes: pd.DataFrame, use_level2: bool = False):
+def load_district_polygons(ee, nodes: pd.DataFrame):
     """
-    Load the 25 Sri Lankan district polygons and attach canonical identity.
-
-    GADM level 1 is the district level for Sri Lanka. Level 2 is 323 DS
-    divisions nested under the same districts and is dissolved on the district
-    name when requested. Both paths are verified to yield exactly 25 polygons.
-
-    Every GADM name is mapped explicitly. An unmapped name raises.
+    Load the 25 Sri Lankan district polygons from geoBoundaries ADM2
+    and attach canonical district identities.
     """
 
-    if use_level2:
-        collection = (
-            ee.FeatureCollection(GADM_LEVEL2_ASSET)
-            .filter(ee.Filter.eq("GID_0", "LKA"))
-        )
+    source = (
+        ee.FeatureCollection(DISTRICT_BOUNDARY_ASSET)
+        .filter(ee.Filter.eq("shapeGroup", "LKA"))
+    )
 
-        # Dissolve the DS divisions back to districts. The union is taken per
-        # district name so the result is the same 25 polygons as level 1.
-        districts = collection.distinct("NAME_1").aggregate_array("NAME_1")
+    # Rename shapeName to gadm_name so the existing downstream mapping
+    # and validation logic can remain unchanged.
+    polygons = source.map(
+        lambda feature: feature.set("gadm_name", feature.get("shapeName"))
+    )
 
-        def _dissolve(name):
-            subset = collection.filter(ee.Filter.eq("NAME_1", name))
-
-            return ee.Feature(
-                subset.geometry().dissolve(maxError=1),
-                {"gadm_name": name},
-            )
-
-        polygons = ee.FeatureCollection(districts.map(_dissolve))
-        source_level = "GADM 4.1 level 2, dissolved to district"
-    else:
-        polygons = (
-            ee.FeatureCollection(GADM_LEVEL1_ASSET)
-            .filter(ee.Filter.eq("GID_0", "LKA"))
-            .map(lambda f: f.set("gadm_name", f.get("NAME_1")))
-        )
-        source_level = "GADM 4.1 level 1"
+    source_level = "geoBoundaries v6 ADM2"
 
     observed_count = polygons.size().getInfo()
 
     if observed_count != EXPECTED_DISTRICTS:
+        observed_names = polygons.aggregate_array("gadm_name").getInfo()
+
         raise ValueError(
             f"{source_level} returned {observed_count} polygons for Sri Lanka, "
-            f"expected {EXPECTED_DISTRICTS}."
+            f"expected {EXPECTED_DISTRICTS}.\n"
+            f"Observed names: {sorted(observed_names)}"
         )
 
     gadm_names = sorted(polygons.aggregate_array("gadm_name").getInfo())
 
     verify_district_mapping(gadm_names, nodes)
 
-    # Attach node_id and canonical_name from the registry, by explicit lookup.
     lookup = {
-        gadm_name: GADM_TO_CANONICAL[gadm_name] for gadm_name in gadm_names
+        source_name: BOUNDARY_TO_CANONICAL[source_name]
+        for source_name in gadm_names
     }
 
     node_lookup = dict(
@@ -343,8 +328,8 @@ def load_district_polygons(ee, nodes: pd.DataFrame, use_level2: bool = False):
     )
 
     def _label(feature):
-        gadm_name = feature.get("gadm_name")
-        canonical = canonical_map.get(gadm_name)
+        source_name = feature.get("gadm_name")
+        canonical = canonical_map.get(source_name)
 
         return feature.set(
             {
@@ -362,7 +347,7 @@ def verify_district_mapping(gadm_names: list[str], nodes: pd.DataFrame) -> None:
     districts, with one polygon, one node_id and one canonical name each.
     """
 
-    unmapped = sorted(set(gadm_names) - set(GADM_TO_CANONICAL))
+    unmapped = sorted(set(gadm_names) - set(BOUNDARY_TO_CANONICAL))
 
     if unmapped:
         raise ValueError(
@@ -371,7 +356,7 @@ def verify_district_mapping(gadm_names: list[str], nodes: pd.DataFrame) -> None:
             "similarity."
         )
 
-    obsolete = sorted(set(GADM_TO_CANONICAL) - set(gadm_names))
+    obsolete = sorted(set(BOUNDARY_TO_CANONICAL) - set(gadm_names))
 
     if obsolete:
         raise ValueError(
@@ -382,7 +367,7 @@ def verify_district_mapping(gadm_names: list[str], nodes: pd.DataFrame) -> None:
     if len(gadm_names) != len(set(gadm_names)):
         raise ValueError("A GADM district name appears on two polygons.")
 
-    canonical_names = [GADM_TO_CANONICAL[name] for name in gadm_names]
+    canonical_names = [BOUNDARY_TO_CANONICAL[name] for name in gadm_names]
 
     if len(canonical_names) != len(set(canonical_names)):
         duplicated = sorted(
@@ -421,10 +406,13 @@ def verify_district_mapping(gadm_names: list[str], nodes: pd.DataFrame) -> None:
     except Exception:
         return
 
-    if module.GADM_TO_CANONICAL != GADM_TO_CANONICAL:
+    node_canonical = set(nodes["canonical_name"])
+    weather_canonical = set(BOUNDARY_TO_CANONICAL.values())
+
+    if node_canonical != weather_canonical:
         raise ValueError(
-            "GADM_TO_CANONICAL here disagrees with 3.create_nodes.py. "
-            "Update both together."
+            "Node registry and weather boundary mapping have different "
+            "canonical districts."
         )
 
 
@@ -458,13 +446,13 @@ def build_daily_image(ee, day):
     )
 
     temperature = hourly.select("temperature_2m")
-    dewpoint = hourly.select("dewpoint_2m")
+    dewpoint = hourly.select("dewpoint_temperature_2m")
 
     def _derive(image):
         """Per-hour relative humidity and wind speed."""
 
         t_c = image.select("temperature_2m").subtract(273.15)
-        td_c = image.select("dewpoint_2m").subtract(273.15)
+        td_c = image.select("dewpoint_temperature_2m").subtract(273.15)
 
         # Magnus saturation vapour pressure, hPa.
         def _es(temp_c):
@@ -532,14 +520,52 @@ def build_daily_image(ee, day):
     return daily.set("date", day.format("YYYY-MM-dd"))
 
 
-def extract_year(ee, polygons, year: int, start: date, end: date):
-    """
-    Extract one year of daily district values.
+def extract_date_chunk(
+    ee,
+    polygons,
+    chunk_start: date,
+    chunk_end: date,
+) -> pd.DataFrame:
+    """Extract weather sequentially, one day per Earth Engine request."""
 
-    The reduction runs at AGGREGATION_SCALE_M over the downsampled grid, so
-    every district — including Colombo, which is smaller than one native ERA5
-    cell — is sampled at many points and the mean is area-aware.
-    """
+    frames = []
+    current_day = chunk_start
+
+    while current_day <= chunk_end:
+        print(f"\n        {current_day}...", end=" ", flush=True)
+
+        daily = build_daily_image(ee, ee.Date(str(current_day)))
+
+        reduced = daily.reduceRegions(
+            collection=polygons,
+            reducer=ee.Reducer.mean(),
+            scale=AGGREGATION_SCALE_M,
+            tileScale=4,
+        ).map(
+            lambda feature: feature.set("date", str(current_day))
+        )
+
+        frame = _feature_collection_to_frame(ee, reduced)
+        frames.append(frame)
+
+        print(f"{len(frame)} rows")
+
+        current_day += pd.Timedelta(days=1)
+
+    if not frames:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    return pd.concat(frames, ignore_index=True)
+
+
+def extract_year(
+    ee,
+    polygons,
+    year: int,
+    start: date,
+    end: date,
+) -> pd.DataFrame:
+    """Extract one year in monthly chunks to avoid Earth Engine limits."""
 
     year_start = max(start, date(year, 1, 1))
     year_end = min(end, date(year, 12, 31))
@@ -547,28 +573,44 @@ def extract_year(ee, polygons, year: int, start: date, end: date):
     if year_start > year_end:
         return pd.DataFrame(columns=OUTPUT_COLUMNS)
 
-    day_count = (year_end - year_start).days + 1
+    frames = []
 
-    days = ee.List.sequence(0, day_count - 1).map(
-        lambda offset: ee.Date(str(year_start)).advance(offset, "day")
-    )
+    current_start = year_start
 
-    def _reduce_day(day):
-        daily = build_daily_image(ee, day)
+    while current_start <= year_end:
+        next_month = (
+            pd.Timestamp(current_start)
+            + pd.offsets.MonthBegin(1)
+        ).date()
 
-        reduced = daily.reduceRegions(
-            collection=polygons,
-            reducer=ee.Reducer.mean(),
-            scale=AGGREGATION_SCALE_M,
+        current_end = min(
+            next_month - pd.Timedelta(days=1),
+            year_end,
         )
 
-        return reduced.map(
-            lambda feature: feature.set("date", ee.Date(day).format("YYYY-MM-dd"))
+        print(
+            f"\n      {current_start} to {current_end}...",
+            end=" ",
+            flush=True,
         )
 
-    collection = ee.FeatureCollection(days.map(_reduce_day)).flatten()
+        frame = extract_date_chunk(
+            ee,
+            polygons,
+            current_start,
+            current_end,
+        )
 
-    return _feature_collection_to_frame(ee, collection)
+        frames.append(frame)
+
+        print(f"{len(frame)} rows")
+
+        current_start = current_end + pd.Timedelta(days=1)
+
+    if not frames:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    return pd.concat(frames, ignore_index=True)
 
 
 def _feature_collection_to_frame(ee, collection) -> pd.DataFrame:
@@ -640,6 +682,131 @@ def finalise_chunk(frame: pd.DataFrame) -> pd.DataFrame:
     return result[OUTPUT_COLUMNS].sort_values(
         ["date", "node_id"]
     ).reset_index(drop=True)
+
+
+def build_export_collection(
+    ee,
+    polygons,
+    window_start: date,
+    window_end: date,
+):
+    """Build one FeatureCollection covering a closed date window."""
+
+    start_day = ee.Date(window_start.isoformat())
+    day_count = (window_end - window_start).days
+
+    def _one_day(offset):
+        day = start_day.advance(ee.Number(offset), "day")
+        daily = build_daily_image(ee, day)
+
+        return daily.reduceRegions(
+            collection=polygons,
+            reducer=ee.Reducer.mean(),
+            scale=AGGREGATION_SCALE_M,
+            tileScale=4,
+        ).map(
+            lambda feature: feature.set("date", day.format("YYYY-MM-dd"))
+        )
+
+    return ee.FeatureCollection(
+        ee.List.sequence(0, day_count).map(_one_day)
+    ).flatten()
+
+
+def iter_export_windows(
+    start: date,
+    end: date,
+    granularity: str,
+):
+    """Yield the export windows that should become separate Drive tasks."""
+
+    current_start = start
+
+    while current_start <= end:
+        if granularity == "month":
+            last_day = calendar_lib.monthrange(
+                current_start.year, current_start.month
+            )[1]
+            current_end = min(
+                date(current_start.year, current_start.month, last_day),
+                end,
+            )
+            label = f"{current_start.year}_{current_start.month:02d}"
+        else:
+            current_end = min(date(current_start.year, 12, 31), end)
+            label = f"{current_start.year}"
+
+        yield label, current_start, current_end
+
+        current_start = current_end + timedelta(days=1)
+
+
+def export_task_name(label: str) -> str:
+    """Return the stable export file prefix used by the Drive task."""
+
+    return f"climate_daily_{label}"
+
+
+def submit_export_task(
+    ee,
+    collection,
+    export_folder: str,
+    label: str,
+):
+    """Queue one Earth Engine table export and print its task details."""
+
+    export_name = export_task_name(label)
+
+    task = ee.batch.Export.table.toDrive(
+        collection=collection.select(OUTPUT_COLUMNS, retainGeometry=False),
+        description=export_name,
+        folder=export_folder,
+        fileNamePrefix=export_name,
+        fileFormat="CSV",
+        selectors=OUTPUT_COLUMNS,
+    )
+
+    task.start()
+
+    status = task.status()
+
+    print(
+        f"  submitted {status.get('id')} | {status.get('description')} | "
+        f"{status.get('state')}"
+    )
+
+    return task
+
+
+def print_task_list(ee, prefix: str = "climate_daily_") -> None:
+    """Print queued Earth Engine tasks, filtered to this pipeline when possible."""
+
+    tasks = []
+
+    for task in ee.batch.Task.list():
+        status = task.status()
+        description = status.get("description", "")
+
+        if prefix and not description.startswith(prefix):
+            continue
+
+        tasks.append(status)
+
+    tasks.sort(key=lambda item: (item.get("state", ""), item.get("description", "")))
+
+    print("\nEarth Engine tasks")
+    print("-" * 62)
+
+    if not tasks:
+        print("No matching tasks found.")
+        return
+
+    for status in tasks:
+        print(
+            f"{status.get('state', 'UNKNOWN'):<12} "
+            f"{status.get('id', '<no id>')} "
+            f"{status.get('description', '<no description>')}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -871,8 +1038,11 @@ def write_manifest(
         "data_source": DATA_SOURCE,
         "earth_engine_assets": {
             "era5": ERA5_ASSET,
-            "gadm_level1": GADM_LEVEL1_ASSET,
-            "gadm_level2": GADM_LEVEL2_ASSET,
+            "earth_engine_assets": {
+                "era5": ERA5_ASSET,
+                "district_boundaries": DISTRICT_BOUNDARY_ASSET,
+                "boundary_source_used": source_level,
+            },
             "boundary_source_used": source_level,
         },
         "settings": {
@@ -904,12 +1074,28 @@ def parse_arguments():
     parser.add_argument("--start", help="First date, YYYY-MM-DD.")
     parser.add_argument("--end", help="Last date, YYYY-MM-DD.")
     parser.add_argument("--project", help="Earth Engine Cloud project id.")
-
     parser.add_argument(
-        "--use-level2",
+        "--submit-exports",
         action="store_true",
-        help="Dissolve GADM level 2 to districts instead of using level 1.",
+        help="Queue Earth Engine table exports instead of waiting for daily getInfo calls.",
     )
+    parser.add_argument(
+        "--export-folder",
+        default=DEFAULT_EXPORT_FOLDER,
+        help="Google Drive folder for submitted export tasks.",
+    )
+    parser.add_argument(
+        "--export-granularity",
+        choices=EXPORT_GRANULARITY_CHOICES,
+        default="year",
+        help="Submit one export per year, or per month if yearly exports are too large.",
+    )
+    parser.add_argument(
+        "--check-tasks",
+        action="store_true",
+        help="List queued Earth Engine tasks and exit.",
+    )
+
 
     parser.add_argument(
         "--validate-only",
@@ -936,6 +1122,11 @@ def main() -> int:
     """Extract, combine and validate the daily district climate data."""
 
     arguments = parse_arguments()
+
+    if arguments.check_tasks:
+        ee = initialise_earth_engine(arguments.project)
+        print_task_list(ee)
+        return 0
 
     nodes = load_nodes()
 
@@ -964,8 +1155,7 @@ def main() -> int:
     print(f"Expected rows:   {((end - start).days + 1) * EXPECTED_DISTRICTS}")
     print(f"Yearly chunks:   {len(years)} ({years[0]}-{years[-1]})")
     print(f"ERA5 asset:      {ERA5_ASSET}")
-    print(f"Boundaries:      "
-          f"{GADM_LEVEL2_ASSET if arguments.use_level2 else GADM_LEVEL1_ASSET}")
+    print(f"Boundaries:      {DISTRICT_BOUNDARY_ASSET}")
 
     if arguments.dry_run:
         print("\nDry run: local inputs verified, no Earth Engine calls made.")
@@ -973,40 +1163,46 @@ def main() -> int:
 
     ee = initialise_earth_engine(arguments.project)
 
-    polygons, source_level = load_district_polygons(
-        ee, nodes, use_level2=arguments.use_level2
-    )
+    polygons, source_level = load_district_polygons(ee, nodes)
 
     print(f"Boundaries used: {source_level}, {EXPECTED_DISTRICTS} polygons")
-    print("District mapping verified: every GADM name maps explicitly.\n")
+    print("District mapping verified: every boundary name maps explicitly.\n")
 
-    CHUNK_DIR.mkdir(parents=True, exist_ok=True)
+    if not arguments.submit_exports:
+        print(
+            "\nNOTE: this script now queues Earth Engine exports instead of "
+            "pulling each day back with getInfo(). Use --submit-exports to "
+            "make the intent explicit."
+        )
 
-    for year in years:
-        path = chunk_path(year)
+    print(
+        f"Submitting {arguments.export_granularity} exports to Drive folder "
+        f"{arguments.export_folder!r}..."
+    )
 
-        if path.exists() and not arguments.overwrite:
-            print(f"  {year}: already extracted, skipping")
-            continue
+    submitted = 0
 
-        print(f"  {year}: extracting...", end=" ", flush=True)
+    for label, window_start, window_end in iter_export_windows(
+        start, end, arguments.export_granularity
+    ):
+        print(f"  {label}: {window_start} to {window_end}")
 
-        frame = finalise_chunk(extract_year(ee, polygons, year, start, end))
+        collection = build_export_collection(ee, polygons, window_start, window_end)
+        submit_export_task(
+            ee,
+            collection,
+            arguments.export_folder,
+            label,
+        )
 
-        frame.to_csv(path, index=False)
+        submitted += 1
 
-        print(f"{len(frame)} rows")
-
-    combined = combine_chunks(start, end)
-
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    combined.to_csv(OUTPUT_PATH, index=False)
-
-    print(f"\nWrote {OUTPUT_PATH.relative_to(PROJECT_DIR)}")
-
-    summary = validate_extraction(combined, nodes, start, end)
-
-    write_manifest(summary, start, end, source_level)
+    print(f"\nSubmitted {submitted} Earth Engine export task(s).")
+    print(
+        "Download the CSV files into data/raw/era5_chunks/ and rerun the "
+        "script with --validate-only after combining them into "
+        "data/raw/climate_daily_district.csv."
+    )
 
     return 0
 

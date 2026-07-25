@@ -1,0 +1,6 @@
+canonical_name,total_days,days_both_present,era5_missing_days,chirps_missing_days,pearson_r,spearman_r,era5_mean_mm,chirps_mean_mm,mean_difference_mm,relative_bias,era5_wet_days,chirps_wet_days,era5_heavy_days,chirps_heavy_days,era5_extreme_days,chirps_extreme_days,note
+Colombo,7429,7429,0,0,0.51,0.6025,9.067,9.068,-0.001,-0.0001,6021,4332,105,119,11,5,
+Gampaha,7429,7429,0,0,0.5198,0.6164,7.515,7.637,-0.122,-0.016,5772,4232,70,61,8,1,
+Ratnapura,7429,7429,0,0,0.4906,0.6431,8.921,8.322,0.599,0.072,6545,4735,103,68,11,1,
+Jaffna,7429,7429,0,0,0.6601,0.5804,3.273,3.37,-0.098,-0.029,2899,1920,45,77,11,2,
+Anuradhapura,7429,7429,0,0,0.6453,0.7084,3.696,4.374,-0.678,-0.155,3788,3096,33,46,4,1,
