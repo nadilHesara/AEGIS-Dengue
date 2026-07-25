@@ -140,6 +140,20 @@ OUTPUT_COLUMNS = [
 ]
 
 
+def _ensure_source_calendar_keys(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure the explicit source calendar join keys exist."""
+
+    result = df.copy()
+
+    if "source_year" not in result.columns:
+        result["source_year"] = result["year"]
+
+    if "source_week" not in result.columns:
+        result["source_week"] = result["week"]
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
@@ -152,7 +166,7 @@ def load_raw_dengue(
 
     df = pd.read_csv(path)
 
-    result = df.copy()
+    result = _ensure_source_calendar_keys(df)
 
     result["start_date"] = pd.to_datetime(
         result["start.date"], format=date_format, errors="coerce"
@@ -201,10 +215,11 @@ def join_reporting_calendar(
     entry describing exactly its label and its interval.
     """
 
+    rows = _ensure_source_calendar_keys(rows)
+
     merged = rows.merge(
         calendar,
-        left_on=["year", "week", "start_date", "end_date"],
-        right_on=["source_year", "source_week", "start_date", "end_date"],
+        on=["source_year", "source_week", "start_date", "end_date"],
         how="left",
         validate="many_to_one",
     )
