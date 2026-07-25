@@ -520,7 +520,7 @@ def test_chirps_reuses_the_era5_districts_and_scale():
     assert chirps.AGGREGATION_SCALE_M == chirps.era5.AGGREGATION_SCALE_M
 
     # The polygon source is the ERA5 module's, not a second definition.
-    assert chirps.era5.GADM_LEVEL1_ASSET
+    assert chirps.era5.DISTRICT_BOUNDARY_ASSET
 
 
 def test_chirps_missing_rainfall_is_never_zero():
