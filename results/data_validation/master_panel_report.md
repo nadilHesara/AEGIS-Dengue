@@ -1,7 +1,9 @@
 # Master weekly modelling panel
 
-Structural rows: 25300
+Frozen version: `data-v1`
+Creation commit: `435864a3fd20e2d4893df4a760f5e93e53c79a5b`
 
+Structural rows: 25300
 Reporting periods: 1012
 Canonical districts: 25
 Observed case rows: 25299

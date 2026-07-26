@@ -1,0 +1,21 @@
+# Model training dependencies.
+#
+# Kept separate from requirements.txt so the data pipeline stays installable
+# without a deep learning stack. The pipeline scripts (0-14) never import torch;
+# only scripts 15 and 16 do.
+#
+# Install alongside the pipeline requirements:
+#
+#     pip install -r requirements.txt
+#     pip install -r requirements-model.txt
+#
+# For a CPU-only install, which is sufficient for this model at 25 nodes and
+# ~1000 reporting periods, use the CPU wheel index instead:
+#
+#     pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# No PyTorch Geometric. The adjacency is a dense 25 x 25 matrix, where a plain
+# matmul is faster than any sparse gather and avoids pinning torch-scatter to a
+# specific torch build.
+
+torch==2.13.0
