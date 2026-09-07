@@ -317,14 +317,47 @@ def build_anchor(
 # Training
 # ---------------------------------------------------------------------------
 
+def parameter_groups(model: nn.Module, config: dict) -> list[dict]:
+    """Split off any lag-encoder parameters so they can take their own rate.
+
+    The delay kernels sit behind a softmax and a Gaussian shape, so the gradient
+    reaching them is far smaller than the gradient reaching the GRU. At a shared
+    learning rate they barely move from their initialisation and the module
+    looks like it does nothing. Models without an encoder are unaffected.
+    """
+
+    encoder = getattr(model, "encoder", None)
+    if encoder is None:
+        return list(model.parameters())
+
+    encoder_ids = {id(p) for p in encoder.parameters()}
+    rest = [p for p in model.parameters() if id(p) not in encoder_ids]
+
+    return [
+        {"params": rest},
+        {
+            "params": list(encoder.parameters()),
+            "lr": config.get("kernel_learning_rate", config["learning_rate"]),
+            "weight_decay": 0.0,
+        },
+    ]
+
+
 def train_one(
     arrays: dict[str, dict[str, np.ndarray]],
     adjacency: np.ndarray,
     config: dict,
     seed: int,
     device: torch.device,
+    build_model=None,
 ) -> tuple[nn.Module, dict]:
-    """Train one model on one fold with one seed, early stopping on validation."""
+    """Train one model on one fold with one seed, early stopping on validation.
+
+    `build_model` takes the input feature count and returns the module to train.
+    It defaults to the plain GCN+GRU. The hook exists so a variant can reuse this
+    loop verbatim rather than copying it: an experiment that reimplements early
+    stopping or the optimiser is no longer comparable to this baseline.
+    """
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -346,16 +379,21 @@ def train_one(
 
     adjacency_tensor = torch.from_numpy(adjacency).to(device)
 
-    model = GCNGRU(
-        n_features=x_train.shape[-1],
-        hidden=config["hidden"],
-        gcn_layers=config["gcn_layers"],
-        horizon=config["horizon"],
-        dropout=config["dropout"],
-    ).to(device)
+    if build_model is None:
+        model = GCNGRU(
+            n_features=x_train.shape[-1],
+            hidden=config["hidden"],
+            gcn_layers=config["gcn_layers"],
+            horizon=config["horizon"],
+            dropout=config["dropout"],
+        )
+    else:
+        model = build_model(x_train.shape[-1])
+
+    model = model.to(device)
 
     optimiser = torch.optim.Adam(
-        model.parameters(),
+        parameter_groups(model, config),
         lr=config["learning_rate"],
         weight_decay=config["weight_decay"],
     )
