@@ -124,6 +124,18 @@ correction.
 `v1 − v0` is what hand-specified climate lags are worth, and is the number the
 contribution must beat.
 
+> **Update, 2026-09-07 — the full baseline sweep makes this target negative.**
+> The 9-fold, 3-seed sweep (`scripts/16`, see [`docs/baseline.md`](baseline.md)
+> §3) measures `v0` at 16.67 headline MAE and `v1` at 17.12 on the `gru_only`
+> backbone, and 19.08 against 19.01 on `gcn_gru` — so hand-specified lags are
+> worth roughly **−0.45 MAE**, not a positive quantity. This does not overturn
+> §6's finding that the learned encoder is worse than both, but it does change
+> what that finding means: the module was benchmarked against a feature set that
+> is itself slightly worse than using no lag features at all. Any sentence in
+> this document framing `hand_lags_v1` as "the thing to beat" should be read with
+> that in mind, and §6.1's `no_lags_v0` beating `hand_lags_v1` by 1.6% is now
+> corroborated at 9 folds and 3 seeds rather than 1 seed.
+
 **Naive baselines, all 9 folds:** persistence 16.42 headline MAE / 26.61 peak
 MAE; seasonal naive 55.45 / 84.81. Seasonal naive being 3× worse than
 persistence is the key dataset fact: Sri Lankan dengue's interannual variation
