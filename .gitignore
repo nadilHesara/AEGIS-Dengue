@@ -1,6 +1,7 @@
 .venv
 
-data
+data/
+reslts/
 
 scripts/__pycache__
 

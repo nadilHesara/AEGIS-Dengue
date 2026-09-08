@@ -1,4 +1,4 @@
-name: Run All scripts
+name: Run All Scripts
 
 on:
     push:
@@ -16,22 +16,88 @@ jobs:
             - name: Set up python
               uses: actions/setup-python@v4
               with:
-                  python-version: 3.12
-            
+                  python-version: "3.12"
+
+            # --- Cache 1: pip packages ---
+            - name: Cache pip dependencies
+              uses: actions/cache@v4
+              with:
+                  path: ~/.cache/pip
+                  key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements-model.txt') }}
+                  restore-keys: |
+                      ${{ runner.os }}-pip-
+
+            # --- Cache 2: data/ (gitignored — raw downloads, GEE exports, processed tensors) ---
+            - name: Cache data directory
+              id: cache-data
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      data/raw
+                      data/interim
+                      data/processed
+                  key: ${{ runner.os }}-data-${{ hashFiles('scripts/*.py', 'configs/**') }}
+                  restore-keys: |
+                      ${{ runner.os }}-data-
+
             - name: Install dependencies
               run: |
-                python -m pip install --upgrade pip
-                pip install -r requirements.txt
-                pip install -r requirements-model.txt
+                  python -m pip install --upgrade pip
+                  pip install -r requirements.txt
+                  pip install -r requirements-model.txt
 
-            - name: Run Scripts
+            - name: Run data acquisition & validation scripts
               run: |
-                python scripts/0.load_dataset.py
-                python scripts/1.dataset_validate.py
-                python scripts/2.create_calendar.py
-                python scripts/3.create_nodes.py
-                python scripts/4.create_canonical_dengue.py
+                  python scripts/0.load_dataset.py
+                  python scripts/1.dataset_validate.py
+                  python scripts/2.create_calendar.py
+                  python scripts/3.create_nodes.py
+                  python scripts/4.create_canonical_dengue.py
 
-            - name: Check tests
+            - name: Combine ERA5/CHIRPS chunks (only if pre-downloaded chunks are cached)
               run: |
-                python -m pytest tests/
+                  if [ -d "data/raw/era5_chunks" ] && [ "$(ls -A data/raw/era5_chunks)" ]; then
+                    python scripts/5b.combine_era5_chunks.py
+                  else
+                    echo "No cached era5_chunks/ found — skipping (requires manual GEE export + Drive download)."
+                  fi
+
+                  if [ -d "data/raw/chirps_chunks" ] && [ "$(ls -A data/raw/chirps_chunks)" ]; then
+                    python scripts/7b.combine_chirps_chunks.py
+                  else
+                    echo "No cached chirps_chunks/ found — skipping (requires manual GEE export + Drive download)."
+                  fi
+
+            - name: Run climate & panel-building scripts (require cached climate CSVs)
+              run: |
+                  if [ -f "data/raw/climate_daily_district.csv" ] && [ -f "data/raw/chirps_daily_rainfall.csv" ]; then
+                    python scripts/6.validate_climate_data.py
+                    python scripts/8.compare_era5_chirps.py
+                    python scripts/9.aggregate_climate_to_periods.py
+                    python scripts/10.create_master_panel.py
+                    python scripts/11.create_imputation_comparison.py
+                    python scripts/12.build_model_tensors.py
+                    python scripts/13.build_adjacency.py
+                    python scripts/14.build_folds.py
+                  else
+                    echo "Climate CSVs not present in cache — skipping steps 6, 8-14."
+                    echo "Seed the cache once by running the GEE extraction (scripts 5/7) locally and pushing a run with the files in place."
+                  fi
+
+            - name: Run baseline & model scripts
+              run: |
+                  if [ -f "data/processed/model_tensors.npz" ] || [ -d "data/processed" ]; then
+                    python scripts/15.evaluate_naive_baselines.py
+                    python scripts/16.train_gcn_gru.py
+                    python scripts/17.lag_correlation_scan.py
+                    python scripts/18.train_lag_gcn_gru.py
+                    python scripts/19.lag_demo.py
+                    python scripts/20.train_improved.py
+                    python scripts/21.train_gated_gcn_gru.py
+                  else
+                    echo "No model tensors available — skipping training scripts (depends on climate/panel steps above)."
+                  fi
+
+            - name: Run tests
+              run: |
+                  python -m pytest tests/
