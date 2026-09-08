@@ -86,7 +86,7 @@ jobs:
 
             - name: Run baseline & model scripts
               run: |
-                  if [ -f "data/processed/model_tensors.npz" ] || [ -d "data/processed" ]; then
+                  if [ -f "data/processed/model_tensors_v0.npz" ] && [ -f "data/processed/folds.json" ]; then
                     python scripts/15.evaluate_naive_baselines.py
                     python scripts/16.train_gcn_gru.py
                     python scripts/17.lag_correlation_scan.py
