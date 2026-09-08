@@ -1,5 +1,0 @@
-convention_id,valid_from,valid_to,expected_start_weekday,description
-1,2006-12-23,2009-04-25,Saturday,"Original Saturday-to-Friday convention, including the 8-day 2009 week 17 period which still starts on a Saturday."
-2,2009-04-26,2009-05-29,Sunday,"Temporary Sunday start caused by the 8-day 2009 week 17 period. Ends with the 6-day 2009 week 22 period, which restores the Saturday phase."
-3,2009-05-30,2025-12-26,Saturday,"Saturday convention restored from 2009 week 23 until the last Saturday-start period, 2025-12-20 to 2025-12-26."
-4,2025-12-29,,Monday,Permanent Monday-to-Sunday convention from the period labelled 2026 week 1 onward.
