@@ -68,11 +68,11 @@ COVID folds are excluded from the headline and reported separately.
 
 | Arm | MAE | vs baseline | RMSE | Peak MAE | 2017 MAE | 2017 peak MAE | COVID MAE | Seed sd |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `level_weighted` | 16.69 | +12.2% | 34.38 | 28.30 | 38.52 | 42.88 | 7.29 | 0.66 |
-| `quantile` | 17.32 | +8.8% | 36.26 | 28.14 | 44.26 | 49.72 | 7.00 | 0.29 |
-| `huber_weighted` | 17.36 | +8.7% | 36.35 | 28.46 | 44.24 | 49.75 | 7.05 | 0.44 |
-| `huber` | 17.41 | +8.4% | 36.54 | 28.21 | 44.19 | 49.65 | 7.30 | 0.34 |
-| `baseline` | 19.01 | — | 40.63 | 30.47 | 55.01 | 62.40 | 7.39 | 0.62 |
+| `level_weighted` | 16.59 | +12.6% | 34.30 | 28.14 | 38.06 | 42.32 | 7.14 | 0.57 |
+| `quantile` | 17.14 | +9.7% | 35.69 | 27.91 | 42.75 | 47.88 | 7.02 | 0.36 |
+| `huber_weighted` | 17.71 | +6.7% | 37.21 | 28.86 | 46.66 | 52.58 | 7.13 | 0.51 |
+| `huber` | 18.17 | +4.3% | 38.30 | 29.06 | 49.76 | 56.29 | 7.21 | 0.65 |
+| `baseline` | 18.98 | — | 40.36 | 30.36 | 54.81 | 62.15 | 7.35 | 0.68 |
 
 ## Results — seed-mean ensembles
 
@@ -83,11 +83,11 @@ from the loss comparison above.
 
 | Arm | MAE | vs baseline single | RMSE | Peak MAE | 2017 MAE | 2017 peak MAE | COVID MAE |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `level_weighted` | 16.39 | +13.8% | 33.60 | 27.86 | 37.11 | 41.25 | 7.25 |
-| `quantile` | 17.24 | +9.3% | 36.05 | 28.01 | 44.00 | 49.45 | 7.00 |
-| `huber_weighted` | 17.26 | +9.2% | 36.13 | 28.29 | 43.93 | 49.41 | 7.04 |
-| `huber` | 17.35 | +8.7% | 36.41 | 28.10 | 44.08 | 49.54 | 7.29 |
-| `baseline` | 18.92 | +0.4% | 40.45 | 30.29 | 54.82 | 62.21 | 7.35 |
+| `level_weighted` | 16.36 | +13.8% | 33.63 | 27.83 | 36.92 | 41.01 | 7.11 |
+| `quantile` | 17.03 | +10.3% | 35.51 | 27.76 | 42.21 | 47.29 | 7.00 |
+| `huber_weighted` | 17.61 | +7.2% | 36.99 | 28.72 | 46.22 | 52.11 | 7.11 |
+| `huber` | 18.09 | +4.7% | 38.13 | 28.93 | 49.48 | 55.99 | 7.19 |
+| `baseline` | 18.88 | +0.5% | 40.19 | 30.21 | 54.45 | 61.77 | 7.32 |
 
 ### Naive baselines, on the same folds and masks
 
@@ -100,21 +100,21 @@ from the loss comparison above.
 
 | Fold | Year | `baseline` | `huber` | `huber_weighted` | `level_weighted` | `quantile` | Note |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 2017 | 55.01 | 44.19 | 44.24 | 38.52 | 44.26 | epidemic |
-| 2 | 2018 | 10.08 | 10.17 | 9.90 | 9.97 | 9.87 |  |
-| 3 | 2019 | 17.57 | 17.51 | 17.60 | 17.85 | 17.30 |  |
-| 4 | 2020 | 7.54 | 7.40 | 6.86 | 7.32 | 6.78 | COVID |
-| 5 | 2021 | 7.25 | 7.21 | 7.24 | 7.27 | 7.23 | COVID |
-| 6 | 2022 | 12.17 | 12.23 | 12.34 | 12.20 | 12.38 |  |
-| 7 | 2023 | 19.07 | 18.76 | 18.38 | 19.13 | 18.42 |  |
-| 8 | 2024 | 10.09 | 10.08 | 10.11 | 10.04 | 10.07 |  |
-| 9 | 2025 | 9.06 | 8.92 | 8.92 | 9.12 | 8.97 |  |
+| 1 | 2017 | 54.81 | 49.76 | 46.66 | 38.06 | 42.75 | epidemic |
+| 2 | 2018 | 10.10 | 10.06 | 9.88 | 9.95 | 9.87 |  |
+| 3 | 2019 | 17.63 | 17.30 | 17.63 | 17.96 | 17.59 |  |
+| 4 | 2020 | 7.49 | 7.21 | 7.01 | 7.03 | 6.83 | COVID |
+| 5 | 2021 | 7.21 | 7.22 | 7.24 | 7.26 | 7.20 | COVID |
+| 6 | 2022 | 12.12 | 12.30 | 12.32 | 12.24 | 12.41 |  |
+| 7 | 2023 | 19.16 | 18.80 | 18.49 | 18.73 | 18.35 |  |
+| 8 | 2024 | 10.09 | 10.05 | 10.11 | 10.09 | 10.13 |  |
+| 9 | 2025 | 8.98 | 8.92 | 8.89 | 9.13 | 8.91 |  |
 
 ## Verdict
 
-Best single-seed arm: **`level_weighted`** at headline MAE 16.69, against the baseline's 19.01 (+12.2%) and persistence at 16.42 (-1.6%).
+Best single-seed arm: **`level_weighted`** at headline MAE 16.59, against the baseline's 18.98 (+12.6%) and persistence at 16.42 (-1.0%).
 
-Best ensemble: **`level_weighted`** at headline MAE 16.39 (+13.8% against the baseline single-seed model).
+Best ensemble: **`level_weighted`** at headline MAE 16.36 (+13.8% against the baseline single-seed model).
 
 **Read the seed sd column before believing any gap.** A difference
 smaller than the seed sd is not established by this run.

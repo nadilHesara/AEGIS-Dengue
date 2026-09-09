@@ -829,7 +829,7 @@ def main() -> int:
     if arguments.folds:
         folds = [f for f in folds if f["fold_id"] in arguments.folds]
 
-    device = torch.device("cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print(f"Device:   {device}")
     print(f"Variant:  {arguments.variant}")
