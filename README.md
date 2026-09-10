@@ -28,7 +28,8 @@ runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 | 8e. Graph representation (identity / contiguity / Gaussian / learned) | Done. **No graph beats the identity control.** The Gaussian graph is worse than contiguity; a graph learned end-to-end is a wash. Closes the dual-graph precondition — see §8e.                                    |
 | 8f. Multi-horizon forecasting (h = 1–4)                               | Done. **The first real improvement in this repository.** At h=3 and h=4 the model beats same-horizon persistence on MAE _and_ peak MAE, 6–7 of 7 folds, p < 0.01, and the gain is not the 2017 artefact — see §8f. |
 | 8g. Layer normalisation before the prediction head                    | Done. **Not established on accuracy** — the headline gain is the 2017 fold and nothing else (±0.31 MAE over the other six). The real result is **24–51% lower seed variance at every horizon** — see §8g.          |
-| 9. Gated fusion, climate ablation at h=4                              | Dual graph **answered negatively** by §8e. The top item is now §8f's follow-up. See §9.                                                                                                                            |
+| 8h. Climate ablation at h = 1–4 (three arms, shuffle control)         | Done. **At h=4 climate content is load-bearing**: a shuffle control holding capacity fixed costs +1.55 MAE (p=0.016) and +3.10 peak MAE, removing half of §8f's skill. Monotonic in the horizon — see §8h.          |
+| 9. Gated fusion, climate ablation at h=4                              | Dual graph **answered negatively** by §8e. Climate ablation **done** in §8h. See §9.                                                                                                                               |
 
 **The one-paragraph summary of where the model stands:** **at one week ahead, no
 configuration in this repository beats persistence** — five separate changes
@@ -892,6 +893,76 @@ Full write-up: [`docs/layer_norm.md`](docs/layer_norm.md).
 
 ---
 
+## 8h. Climate ablation — what actually causes the h=3–4 skill
+
+**The gap §8f left.** §8f proved longer-horizon forecasting produces real skill
+and attributed it to the measured 5–10 week rainfall-to-dengue delay. That
+attribution was never measured. Skill at h=4 is equally consistent with
+persistence going stale faster than the model degrades — the relative margin
+grows while climate contributes nothing. §9 named this the key next experiment.
+
+**The setup** (`scripts/29.train_climate_ablation.py`,
+`src/models/climate_ablation.py`). Three arms on the identity backbone, v1,
+h = 1–4, 9 folds × 3 seeds: `full` (all 23 channels), `no_climate` (the 16
+climate-derived channels sliced out — including the rolling 4/8/12-period lags,
+which are the channels the delay story actually runs through), and `shuffled`
+(all 23 channels, climate time-shuffled within each district).
+
+**The `shuffled` arm is the point.** §6.3 ran the two-arm ablation at h=1 and
+flagged it as confounded: dropping 16 of 23 channels changes input width,
+parameter count and effective regularisation at once, so a penalty need not be
+about weather. The shuffle holds all of that fixed — identical width, identical
+parameter count, identical scaler statistics, identical per-district marginals —
+and destroys only the alignment between weather and time. It permutes whole
+windows, within district, within split, independently per channel, and never
+touches `y`, the mask or the anchor.
+
+### The cost of removing climate, by horizon
+
+| h | `no_climate` Δ MAE | `shuffled` Δ MAE | `shuffled` Δ peak MAE | `shuffled` p |
+| - | ------------------ | ---------------- | --------------------- | ------------ |
+| 1 | −0.25              | +0.02            | +0.40                 | 0.926        |
+| 2 | −0.35              | −0.06            | +0.38                 | 0.854        |
+| 3 | −0.06              | +0.43            | +1.65                 | 0.226        |
+| 4 | **+0.76**          | **+1.55**        | **+3.10**             | **0.016**    |
+
+Positive means the ablation hurt. **Both metrics rise monotonically with the
+horizon** — the shape the 5–10 week delay predicts, and not the shape
+persistence-decay-only would produce (flat near zero everywhere).
+
+### How much of §8f's skill is climate?
+
+| h   | persistence | `full`     | `no_climate` | `shuffled` |
+| --- | ----------- | ---------- | ------------ | ---------- |
+| 3   | 24.58       | **+5.0%**  | +5.2%        | +3.2%      |
+| 4   | 28.47       | **+10.8%** | +8.1%        | +5.3%      |
+
+At h=4, scrambling climate removes **half** the MAE skill (10.8% → 5.3%) and
+about two thirds of the peak-MAE skill (9.8% → 3.3%). At 2.4 seed-sd and
+p = 0.016 it clears this project's standing bar, and it is **not** the 2017
+artefact: `shuffled` hurts on 6/7 folds and excluding fold 1 the cost is
+unchanged (+1.55 → +1.27).
+
+**The h=1 column reproduces §6.3's known anchor** (+0.17 vs the reported ≈+0.01
+MAE on recent normal years), so the harness is checked against a known value
+before the h=4 number is read.
+
+### What this does and does not establish
+
+- **Established:** at h=4 climate's *temporal content* is load-bearing, on a
+  control that holds capacity fixed. This is the first result here to attribute
+  an effect to climate content rather than channel count.
+- **Not established:** climate is not the whole story — `shuffled` still beats
+  persistence by 5.3%, so persistence decay is a real component. And h=3 does
+  not clear the bar on its own (p = 0.226).
+- **A warning:** `no_climate` alone is weak (+0.76, p = 0.267) and negative at
+  h = 1–3. Read without the shuffle control, the plain ablation would have
+  supported the opposite conclusion — which is exactly the §6.3 confound.
+
+Full write-up: [`docs/climate_ablation.md`](docs/climate_ablation.md).
+
+---
+
 ## 9. What the evidence says to do next
 
 Ordered by what §6–8f actually established. Two directions are closed and one has
@@ -901,8 +972,14 @@ the headline out of the noise. §8e closed the _fixed-graph_ direction: three
 graphs including one learned end-to-end all fail to beat no graph. What is left
 is mostly the horizon.
 
-1. **Multi-horizon training (h = 2, 3, 4), and rerun §8e's adaptive graph
-   there.** `--horizon` exists and is unrun. At h=1 the forecast origin carries
+1. **Rerun §8e's adaptive graph at h=4.** Multi-horizon training is now done
+   (§8f) and §8h has shown climate content is load-bearing there, so the
+   condition several negative results were waiting on is established. The graph
+   question is the one that has not yet been retested under it: `scripts/26`
+   takes `--horizon` with no further change. **Superseded in part** — the
+   climate half of this item is answered by §8h.
+
+   _Original text:_ `--horizon` exists and is unrun. At h=1 the forecast origin carries
    nearly all the signal, which is _why_ §7's learnable lags found no gradient,
    why §8's fix only bites in epidemic conditions, and the standing explanation
    for why no graph helps in §8e. This is now the single highest-value item,
@@ -954,11 +1031,11 @@ actually checked this session:
   §8d; `tests/test_graph_variants.py`, 25 tests, §8e; and
   `tests/test_multi_horizon.py`, 34 tests, §8f).
 - `docs/learnable_lags_results.md` states "323 tests pass repository-wide" —
-  that was true when written; it's **527 collected / 527 passed** now, after
+  that was true when written; it's **554 collected / 554 passed** now, after
   `test_improved_losses.py` (24 tests, §8), `test_tuning.py` (14 tests, §8c),
   `test_optimisers.py` (16 tests, §8d), `test_graph_variants.py` (25 tests, §8e),
-  `test_multi_horizon.py` (34 tests, §8f) and `test_layer_norm.py` (21 tests,
-  §8g) were added, one dependency-driven set of
+  `test_multi_horizon.py` (34 tests, §8f), `test_layer_norm.py` (21 tests,
+  §8g) and `test_climate_ablation.py` (27 tests, §8h) were added, one dependency-driven set of
   failures was resolved by installing `scipy` and `matplotlib`, and the 3
   `test_lag_encoder.py` failures stopped once the CUDA torch install (§4) landed
   on `2.11.0+cu128` instead of `2.14.0+cpu`.
@@ -1011,6 +1088,7 @@ were independently re-verified this session by rerunning the scripts twice
 - [`docs/graph_representation.md`](docs/graph_representation.md) — four adjacencies against the identity control
 - [`docs/multi_horizon.md`](docs/multi_horizon.md) — h = 1–4, and the first result that beats persistence
 - [`docs/layer_norm.md`](docs/layer_norm.md) — LayerNorm before the head: an accuracy null and a seed-variance result
+- [`docs/climate_ablation.md`](docs/climate_ablation.md) — what causes the h=3–4 skill: the shuffle control that attributes it to climate
 - [`docs/model_tensors.md`](docs/model_tensors.md) — tensors, folds, adjacency
 - [`docs/learnable_lags_results.md`](docs/learnable_lags_results.md) — Component A
 - [`docs/climate_dataset_schema.md`](docs/climate_dataset_schema.md) — ERA5 extraction spec
