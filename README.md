@@ -6,7 +6,7 @@ case history, a graph-convolution + GRU model over a district contiguity graph.
 
 This file is the single entry point. Section-specific detail lives in
 `docs/`; this README states what is true right now, verified against the code
-and the committed results as of **2026-09-10** (§8c and §8d and their
+and the committed results as of **2026-09-10** (§8c, §8d and §8e and their
 supporting runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 
 ---
@@ -25,7 +25,8 @@ supporting runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 | 8. Simplex activations for the lag encoder | Done. A mechanism result, not an accuracy one — see §8b. |
 | 8c. Hyperparameter search (full GCN+GRU, 9 axes) | Done. Random search, validation-fold selection. **Not a real improvement** — the winning config's test gain is inside seed noise — see §8c. |
 | 8d. Optimiser (Adam vs AdamW) and LR scheduling | Done. Neither is established; the useful result is a **mechanism finding** — a plateau scheduler and early stopping on the same metric barely interact — see §8d. |
-| 9. Dual graph, gated fusion, multi-horizon | Not started. See §9 for what the evidence says to do next. |
+| 8e. Graph representation (identity / contiguity / Gaussian / learned) | Done. **No graph beats the identity control.** The Gaussian graph is worse than contiguity; a graph learned end-to-end is a wash. Closes the dual-graph precondition — see §8e. |
+| 9. Gated fusion, multi-horizon | Dual graph is now **answered negatively** by §8e. See §9 for what is left. |
 
 **The one-paragraph summary of where the model stands:** no configuration in
 this repository beats persistence on the headline mean by a margin that isn't
@@ -36,10 +37,13 @@ objective closes most of that gap without touching the other eight folds.
 Neither of the two training-procedure sweeps changes this picture: a 9-axis
 hyperparameter search (§8c) and an optimiser/schedule comparison (§8d) both
 produce headline movements that are inside the seed noise and both concentrated
-almost entirely in fold 1. Four separate changes have now had that same
-single-fold shape, which makes it a prior rather than a coincidence. None of this
-is a setback dressed up — it's what nine years of data and three seeds actually
-show, and it points at a specific next step (§9) rather than a vague one.
+almost entirely in fold 1. Nor does replacing the graph: a distance kernel and a
+graph learned end-to-end both fail to beat *no graph at all* (§8e), which closes
+the "contiguity is just the wrong graph" hypothesis. Five separate changes have
+now had that same single-fold shape, which makes it a prior rather than a
+coincidence. None of this is a setback dressed up — it's what nine years of data
+and three seeds actually show, and it points at a specific next step (§9) rather
+than a vague one.
 
 ---
 
@@ -49,14 +53,16 @@ show, and it points at a specific next step (§9) rather than a vague one.
 scripts/            numbered pipeline, run in order — see §5
                      24.tune_hyperparameters.py — the 9-axis GCN+GRU search (§8c)
                      25.train_optimisers.py — Adam / AdamW / LR schedule (§8d)
+                     26.train_graph_variants.py — four adjacencies vs identity (§8e)
 src/models/          lag_encoder.py — the learnable-lag module (Component A)
                      simplex_activations.py — alternative simplex maps for its
                      basis mixture (§8b)
+                     adaptive_graph.py — the learnable adjacency (§8e)
 data/raw/             source CSVs (dengue, ERA5, CHIRPS, GADM polygons)
 data/interim/         calendar, canonical dengue, climate joined to periods
 data/processed/       panel, tensors, adjacency, folds — model-ready arrays
 results/              every generated report, metrics CSV and figure
-tests/                447 cases collected, all passing under torch 2.11.0+cu128
+tests/                472 cases collected, all passing under torch 2.11.0+cu128
 docs/                 design documents — one topic each, cross-referenced below
 ```
 
@@ -83,6 +89,7 @@ Read this README first. Go to a doc only for the depth on that topic.
 | [`docs/simplex_activations.md`](docs/simplex_activations.md) | Replacing the lag encoder's softmax: five alternative simplex maps, the sparse-collapse failure mode, full sweep and limits | Yes — written this session against the run on disk |
 | [`docs/hyperparameter_tuning.md`](docs/hyperparameter_tuning.md) | The 9-axis search over the full GCN+GRU: search space, random-vs-Optuna, validation-only selection, the flat response surface, why the "best" config is not an improvement | Yes — written this session against the 50-trial run on disk |
 | [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md) | Adam vs AdamW vs AdamW+ReduceLROnPlateau: the hooks added to script 16, the three-arm sweep, and why the schedule fires after the kept model is already chosen | Yes — written this session against the 9-fold × 3-seed run on disk |
+| [`docs/graph_representation.md`](docs/graph_representation.md) | Four adjacencies against the identity control: contiguity, a Gaussian distance kernel, and a learned graph; what the learned one converged to and why it doesn't resemble geography | Yes — written this session against the 9-fold × 3-seed run on disk |
 | [`docs/proposal_brief.md`](docs/proposal_brief.md) | Source material for a course proposal document, dated 2026-08-04 | **Superseded.** Written before the full sweep; states fold-8-only numbers as "preliminary" and explicitly forbids citing a 9-fold result. That result now exists — see §6. Keep for the proposal-writing instructions, not for the numbers. |
 
 ---
@@ -177,7 +184,8 @@ $py = ".venv\Scripts\python.exe"
 
 About 90 minutes for the pipeline through script 20, almost all of it in the two
 training sweeps; script 24's search adds roughly another 75 minutes for 50
-trials on GPU, and script 25's three-arm sweep about 2 minutes. Add
+trials on GPU, script 25's three-arm sweep about 2 minutes, and script 26's
+four-graph sweep about 6. Add
 `18.train_lag_gcn_gru.py --seeds 1 --no-control` then `19.lag_demo.py` for the
 learnable-lag component (Component A).
 
@@ -199,9 +207,9 @@ Roughly a minute each.
 .venv\Scripts\python.exe -m pytest tests\ -q
 ```
 
-**447 tests collected, 447 pass** (some parametrize into multiple cases; count
+**472 tests collected, 472 pass** (some parametrize into multiple cases; count
 grew from 293 as `test_improved_losses.py`, `test_tuning.py`,
-`test_optimisers.py` and others were added) — verified under `torch==2.11.0+cu128`, with `pyarrow`, `scipy` and
+`test_optimisers.py`, `test_graph_variants.py` and others were added) — verified under `torch==2.11.0+cu128`, with `pyarrow`, `scipy` and
 `matplotlib` also installed. An earlier state this session was **344 passed, 3
 failed** under `torch==2.14.0+cpu`
 earlier this session: `test_lag_encoder.py::test_recovers_planted_delays` on
@@ -646,35 +654,121 @@ tests: [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md).
 
 ---
 
+## 8e. Graph representation — done, and it closes the dual-graph question
+
+**The question.** §6 established that queen contiguity does not help, it hurts.
+That is a statement about *one* graph, and two readings survive it: either the
+graph is wrong (contiguity is a poor prior for a country 430 km long where
+Colombo and Galle are 100 km apart, share no border, and are both wet-zone
+coastal), or there is no spatial signal to find at horizon 1. Separating them
+needs more than one alternative, because a fixed alternative that fails could
+always be the wrong fixed alternative.
+
+**The setup** (`scripts/26.train_graph_variants.py`, `src/models/adaptive_graph.py`).
+Four adjacencies through one GCN+GRU, changing nothing else:
+
+| Arm | Graph |
+|---|---|
+| `identity` | `I` — the control. Substituting the identity makes the graph conv a per-node linear layer, so this arm **is** `gru_only`. |
+| `contiguity` | `A_norm`, queen contiguity |
+| `gaussian` | `A_gaussian_norm`, `exp(-(d/50km)²)` on centroid distance — built by `scripts/13` and never before trained on |
+| `adaptive` | learned end-to-end: `softmax(relu(E1 @ E2ᵀ))`, two `[25, 8]` embedding tables, 400 parameters |
+
+**The reference is `identity`, not `contiguity`** — contiguity already loses to
+doing nothing, so beating it would establish nothing. Both controls reproduce
+their committed numbers exactly (`identity` fold 1 = 42.97 = `gru_only` v1;
+`contiguity` = 54.81 = `gcn_gru` v1). The adaptive arm's graph learning rate has
+a documented failure mode at both ends — at 1× the embeddings never leave their
+uniform initialisation and the arm scores *worse* than the control; at 10× the
+graph collapses toward one-hot rows — so it is **selected per fold on the
+validation split** from {1, 3, 10, 30}×, never on test.
+
+**Run: 9 folds × 3 seeds × 4 arms, 6.2 min GPU.**
+
+| Arm | Headline MAE | vs `identity` | Peak MAE | 2017 MAE | Folds improved | p | Seed sd |
+|---|---|---|---|---|---|---|---|
+| `adaptive` | **16.61** | −0.07 | 28.08 | **40.69** | 2/7 | 0.85 | 0.39 |
+| `identity` (control) | 16.68 | — | 28.06 | 42.97 | — | — | 0.53 |
+| `contiguity` | 18.98 | +2.30 | 30.36 | 54.81 | 0/7 | 0.20 | 0.68 |
+| `gaussian` | 19.25 | +2.57 | 30.89 | 56.81 | 0/7 | 0.22 | 0.46 |
+
+**No graph beats no graph.** That is the answer.
+
+1. **The Gaussian graph does not rescue the idea — it is worse than contiguity.**
+   19.25 vs 18.98, losing on all seven headline folds, and worse than contiguity
+   on the epidemic fold (56.81 vs 54.81). This was the specific alternative §9
+   named as the thing to test first, and it fails. Distance-based spatial
+   smoothing is not the missing ingredient.
+2. **The learned graph is a wash.** −0.07 MAE is 0.16 seed-sd, t = −0.19,
+   p = 0.85, improving only **2 of 7 folds**. Its headline is the identity's with
+   a different fold distribution: a large fold-1 gain (−2.28) paid for by small
+   losses on five of the other six. Over the non-epidemic headline folds it is
+   **+0.30 MAE — worse than no graph.** Fifth consecutive change with this shape.
+3. **The learned graph found structure, but not geography.** Normalised row
+   entropy 0.79 with a largest weight 12× uniform — it is not the identity in
+   disguise. But its correlation with the contiguity graph is **−0.108**,
+   slightly negative, and the collapsed runs pair districts arbitrarily
+   (Ampara→Kurunegala, Matale→Mannar). More consistent with a statistical
+   shortcut exploited during an unusual year than with a transmission pathway.
+
+**The one genuinely new number.** The adaptive arm's fold-1 result is the largest
+single-fold improvement over the identity control anything in this repo has
+produced: **42.97 → 40.69** single-seed, **42.57 → 39.26** as a seed-mean
+ensemble. And the adaptive ensemble's headline, **16.21**, is the first number
+here below persistence's 16.42 — beating it on 6 of 7 folds. But the paired t is
+−0.37, **p = 0.72** (fold 1's magnitude dominates the variance), so it ties
+persistence rather than beating it, exactly as §8's `level_weighted` ensemble
+did — and **peak MAE still loses** (27.47 vs 26.61), which is the criterion an
+outbreak warning system is judged on.
+
+**What this closes.** `docs/baseline.md` §4 item 7 required establishing that
+*some* graph beats the identity before building a season-gated dual graph. That
+precondition is now tested and **not met**: a border graph, a distance kernel and
+a graph learned from the loss itself all fail. Building a gated mixture of two
+components that each lose to the identity would be building on a measured
+negative. The remaining open version of this idea is the adaptive graph at a
+longer horizon (§9 item 1), where the standing explanation for why spatial
+structure adds nothing — at h=1 the forecast origin dominates — no longer holds.
+
+Full write-up, per-fold tables, the learned-graph analysis and the LR-selection
+table: [`docs/graph_representation.md`](docs/graph_representation.md).
+
+---
+
 ## 9. What the evidence says to do next
 
-Ordered by what §6–8d actually established, not by the original work plan (which
-predates the full sweep and assumed the graph was neutral). Note that §8c and
-§8d between them have now largely closed off the *training-procedure* direction:
-the hyperparameter response surface is flat and neither optimiser nor schedule
-moves the headline out of the noise. What is left is structural.
+Ordered by what §6–8e actually established, not by the original work plan (which
+predates the full sweep and assumed the graph was neutral). Two whole directions
+are now closed. §8c and §8d closed the *training-procedure* direction: the
+hyperparameter response surface is flat and neither optimiser nor schedule moves
+the headline out of the noise. §8e closed the *fixed-graph* direction: three
+graphs including one learned end-to-end all fail to beat no graph. What is left
+is mostly the horizon.
 
-1. **Test whether *any* graph beats the identity, before building on top of
-   contiguity.** §6 answered the dual-graph work plan's own stated
-   precondition, and the answer is negative — contiguity costs 1.9 MAE on every
-   fold. `adjacency.npz` already has `A_gaussian`
-   (`exp(-(d/50km)²)`, a better prior for a country this narrow — Colombo and
-   Galle are 100 km apart, share no border, and are both wet-zone coastal) —
-   test it against the identity before adding a season-gated mixture.
-2. **Multi-horizon training (h = 2, 3, 4).** `--horizon` exists and is unrun.
-   At h=1 the forecast origin carries nearly all the signal, which is *why*
-   §7's learnable lags found no gradient and why §8's fix only bites in
-   epidemic conditions. Longer horizons should make climate — and the measured
-   5–10 week delay — actually load-bearing.
-3. **Fix lag kernels to the §7 measured delays instead of learning them
-   end-to-end**, paired with (2). Decouples the delay estimate from a gradient
+1. **Multi-horizon training (h = 2, 3, 4), and rerun §8e's adaptive graph
+   there.** `--horizon` exists and is unrun. At h=1 the forecast origin carries
+   nearly all the signal, which is *why* §7's learnable lags found no gradient,
+   why §8's fix only bites in epidemic conditions, and the standing explanation
+   for why no graph helps in §8e. This is now the single highest-value item,
+   because it is the one condition under which several separate negative results
+   might change sign at once. §8b already found a directional hint for the lag
+   encoder at h=4, and §8e's adaptive graph is the natural companion test —
+   `scripts/26` takes `--horizon` with no further change.
+2. **Fix lag kernels to the §7 measured delays instead of learning them
+   end-to-end**, paired with (1). Decouples the delay estimate from a gradient
    that provably doesn't carry it.
-4. **A count likelihood** (negative binomial or Tweedie) instead of Gaussian-
+3. **A count likelihood** (negative binomial or Tweedie) instead of Gaussian-
    in-log-space. §8's reweighting is a partial, hand-built approximation to
    what a proper count model would do natively.
-5. **Quantile forecasts** at τ ∈ {0.1, 0.5, 0.9} for operational use — the
+4. **Quantile forecasts** at τ ∈ {0.1, 0.5, 0.9} for operational use — the
    pinball loss from §8 already exists; extending it to a real interval is a
    small step.
+5. **Gated spatial/temporal fusion** (`src/models/gated_fusion.py` exists and is
+   unrun at full sweep). §8e weakens the case: the gate chooses per district
+   between a graph branch and an identity branch, and §8e found no graph worth
+   choosing. Its remaining value is diagnostic — the learned gates would say
+   *which* districts, if any, ever want a graph — rather than an expected
+   accuracy gain.
 6. **A non-plateau learning-rate schedule** (cosine annealing or a fixed step
    decay), if the schedule question is worth revisiting at all. §8d showed
    `ReduceLROnPlateau` and early-stopping-on-the-same-metric barely interact —
@@ -694,14 +788,15 @@ actually checked this session:
 
 - `docs/model_tensors.md` states "62 tests, all passing" for the stage-3
   tensor/adjacency/fold tests specifically — still true for that subset, but
-  the repository-wide count has grown to **447 collected, 447 passing** under
+  the repository-wide count has grown to **472 collected, 472 passing** under
   `torch==2.11.0+cu128` as more components were added (most recently
-  `tests/test_tuning.py`, 14 tests, §8c, and `tests/test_optimisers.py`, 16
-  tests, §8d).
+  `tests/test_tuning.py`, 14 tests, §8c; `tests/test_optimisers.py`, 16 tests,
+  §8d; and `tests/test_graph_variants.py`, 25 tests, §8e).
 - `docs/learnable_lags_results.md` states "323 tests pass repository-wide" —
-  that was true when written; it's **447 collected / 447 passed** now, after
-  `test_improved_losses.py` (24 tests, §8), `test_tuning.py` (14 tests, §8c) and
-  `test_optimisers.py` (16 tests, §8d) were added, one dependency-driven set of
+  that was true when written; it's **472 collected / 472 passed** now, after
+  `test_improved_losses.py` (24 tests, §8), `test_tuning.py` (14 tests, §8c),
+  `test_optimisers.py` (16 tests, §8d) and `test_graph_variants.py` (25 tests,
+  §8e) were added, one dependency-driven set of
   failures was resolved by installing `scipy` and `matplotlib`, and the 3
   `test_lag_encoder.py` failures stopped once the CUDA torch install (§4) landed
   on `2.11.0+cu128` instead of `2.14.0+cpu`.
@@ -745,6 +840,8 @@ were independently re-verified this session by rerunning the scripts twice
 - [`docs/baseline.md`](docs/baseline.md) — baseline architecture and full results
 - [`docs/improvements.md`](docs/improvements.md) — the objective-fix work
 - [`docs/hyperparameter_tuning.md`](docs/hyperparameter_tuning.md) — the 9-axis search and why its best config is not an improvement
+- [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md) — Adam vs AdamW and the plateau-scheduler mechanism finding
+- [`docs/graph_representation.md`](docs/graph_representation.md) — four adjacencies against the identity control
 - [`docs/model_tensors.md`](docs/model_tensors.md) — tensors, folds, adjacency
 - [`docs/learnable_lags_results.md`](docs/learnable_lags_results.md) — Component A
 - [`docs/climate_dataset_schema.md`](docs/climate_dataset_schema.md) — ERA5 extraction spec
