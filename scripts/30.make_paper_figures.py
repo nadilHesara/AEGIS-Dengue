@@ -79,7 +79,11 @@ def style() -> None:
             "xtick.major.width": 0.6,
             "ytick.major.width": 0.6,
             "lines.linewidth": 1.4,
-            "figure.dpi": 200,
+            # 400 so the PNG is ~300+ dpi at its printed width. Overleaf
+            # projects that upload PNGs rather than the vector PDFs otherwise
+            # get visibly soft axis text in a two-column layout.
+            "figure.dpi": 400,
+            "savefig.dpi": 400,
             "savefig.bbox": "tight",
             "savefig.pad_inches": 0.02,
             "pdf.fonttype": 42,
