@@ -21,7 +21,8 @@ and the committed results as of **2026-09-09**.
 | 5. GCN+GRU baseline | **Done, full 9-fold × 3-seed sweep** (previously only fold 8 had been run — see §6). |
 | 6. Learnable climate lags (Component A) | Done. A documented **negative result with a diagnosed mechanism** — see §7. |
 | 7. Objective/loss improvements | Done. Fixes the epidemic-fold failure specifically, not the model generally — see §8. |
-| 8. Dual graph, gated fusion, multi-horizon | Not started. See §9 for what the evidence says to do next. |
+| 8. Simplex activations for the lag encoder | Done. A mechanism result, not an accuracy one — see §8b. |
+| 9. Dual graph, gated fusion, multi-horizon | Not started. See §9 for what the evidence says to do next. |
 
 **The one-paragraph summary of where the model stands:** no configuration in
 this repository beats persistence on the headline mean by a margin that isn't
@@ -39,11 +40,13 @@ actually show, and it points at a specific next step (§9) rather than a vague o
 ```
 scripts/            numbered pipeline, run in order — see §5
 src/models/          lag_encoder.py — the learnable-lag module (Component A)
+                     simplex_activations.py — alternative simplex maps for its
+                     basis mixture (§8b)
 data/raw/             source CSVs (dengue, ERA5, CHIRPS, GADM polygons)
 data/interim/         calendar, canonical dengue, climate joined to periods
 data/processed/       panel, tensors, adjacency, folds — model-ready arrays
 results/              every generated report, metrics CSV and figure
-tests/                293 tests (347 parametrized cases), all passing under torch 2.11.0+cu128
+tests/                417 parametrized cases, all passing under torch 2.11.0+cu128
 docs/                 design documents — one topic each, cross-referenced below
 ```
 
@@ -67,6 +70,7 @@ Read this README first. Go to a doc only for the depth on that topic.
 | [`docs/learnable_lags.md`](docs/learnable_lags.md) | The original step-by-step workplan for Component A | **Historical.** Header still says "Status: not started" — the work is done; read `learnable_lags_results.md` for outcomes, this only for the design rationale |
 | [`docs/climate_dataset_schema.md`](docs/climate_dataset_schema.md) | ERA5 extraction spec: variables, unit conversions, district aggregation, UTC handling | Yes — specification, not results, nothing to date |
 | [`docs/reporting_calendar.md`](docs/reporting_calendar.md) | Why `period_id`, not source year/week, is the only safe sort key | Yes — specification |
+| [`docs/simplex_activations.md`](docs/simplex_activations.md) | Replacing the lag encoder's softmax: five alternative simplex maps, the sparse-collapse failure mode, full sweep and limits | Yes — written this session against the run on disk |
 | [`docs/proposal_brief.md`](docs/proposal_brief.md) | Source material for a course proposal document, dated 2026-08-04 | **Superseded.** Written before the full sweep; states fold-8-only numbers as "preliminary" and explicitly forbids citing a 9-fold result. That result now exists — see §6. Keep for the proposal-writing instructions, not for the numbers. |
 
 ---
@@ -380,6 +384,87 @@ Seed-mean ensemble of `level_weighted`: **16.36 MAE** against persistence's
 
 Full results, per-fold tables and limits: [`docs/improvements.md`](docs/improvements.md)
 — **reflects the CPU run's exact numbers; both runs support the same findings.**
+
+---
+
+## 8b. Simplex activations for the lag encoder — done, mechanism result
+
+**First, a correction to a common assumption about this model.** The GCN+GRU is
+a *regression* forecaster — it predicts a case count and is scored with MAE. It
+has **no classification head and no output softmax**. The only softmax in the
+codebase is in `src/models/lag_encoder.py`, normalising a six-Gaussian-bump
+mixture into a delay kernel: a structural simplex constraint, not a
+classification activation. "Change the activation function" therefore lands
+there and nowhere else.
+
+**The question.** That softmax was never chosen, it was the default way onto a
+simplex, and it saturates: `scripts/16`'s `parameter_groups` already documents
+the symptom ("the gradient reaching them is far smaller than the gradient
+reaching the GRU") and patches it with a 10x learning rate. Five alternatives
+were tested — `temp_softmax`, `sparsemax`, `entmax15`, `floored_entmax15`,
+`gumbel_softmax` — against the unchanged softmax as control, varying nothing
+else.
+
+**The mechanism finding, which is the real result.** Sparse simplex maps have an
+**absorbing state**. When a mixture collapses onto one bump the map is locally
+constant, the gradient is exactly zero, and that district-feature pair can never
+recover. Measured on fold 8 over 40 epochs:
+
+| Activation | Initial grad | Mean support | Dead pairs |
+|---|---|---|---|
+| `softmax` | 7.2e-05 | 5.73 | 2% |
+| `sparsemax` | **4.1e-04** | 1.30 | **74%** |
+| `entmax15` | 1.9e-04 | 1.90 | **58%** |
+| `floored_entmax15` | 1.8e-04 | 6.00 | **0%** |
+
+Collapse is progressive (begins ~epoch 5, compounds), so a warm-up would not
+prevent it, and it replicates on fold 1. **Do not ship bare `sparsemax` or
+`entmax15` in this encoder** — three quarters of the delay kernels freeze and
+nothing in the training logs would say so. `floored_entmax15` (2% uniform mass
+mixed back) removes the failure entirely while keeping the highest gradient.
+
+**Accuracy: no arm improves the model.** Best is `sparsemax` on `gru_only`,
+16.67 vs the control's 17.42 — a 0.75 margin against a 0.34 seed sd, which
+clears this project's usual bar and still should not be reported as an
+improvement. **Fold 1 (2017) contributes 96% of it; the other six headline folds
+move by +0.033 MAE, and a paired t-test over folds gives t = +1.05.** Every arm
+on both backbones has this shape (fold-1 share 96–117%, ex-fold-1 movement
+±0.03). This is the same single-fold artefact §8 records for the loss work, so
+`scripts/22` now prints the fold decomposition directly beneath the seed-sd
+verdict — that test alone has now been misleading twice here.
+
+**And a flat result was the prediction, not a disappointment.** §7 established
+that at horizon 1 the previous period's case count carries nearly all the
+signal; dropping every climate channel costs +0.01 MAE. No change to how climate
+is *smoothed* can move a headline that climate barely enters.
+
+**Horizon 4, the predicted place for a signal, shows a trend but not a result.**
+The same sweep at `--horizon 4` — where the measured 5–10 week delay should
+become load-bearing — has `gumbel_softmax` on `gru_only` at +0.79 MAE over the
+control, and this time the epidemic fold is only 58% of it: the other six folds
+move **+0.38 MAE** (against +0.03 at h=1). But the paired t over folds is
+**t = +1.63**, short of significance at seven folds, and the leading arm is the
+*stochastic* one — `sparsemax` and `entmax15`, whose behaviour is understood,
+sit at +0.42 and +0.35. On `gcn_gru` there is nothing (t = +0.64, other folds
+−0.25). The honest reading: the activation matters more at longer horizons,
+directionally as predicted, but three seeds do not establish an improvement.
+
+**Delay recovery** (learned vs `scripts/17`'s measured per-district rainfall
+delay) does not separate at either horizon: at h=1, `floored_entmax15` +0.41,
+`sparsemax` +0.40, softmax +0.36 on `gru_only`, and every arm near zero on
+`gcn_gru`; at h=4 the sparse arms edge up (+0.20) against softmax's +0.01 but
+the per-fold spread (sd ≈ 0.2) still swamps the gap. Note that plain softmax
+scoring **+0.36** at h=1 sits against the **−0.16** in
+`docs/learnable_lags_results.md` — a different single-seed configuration, so not
+a contradiction, but −0.16 should not be quoted as *the* softmax number without
+those conditions. All of this is bounded by `scripts/17` warning that rainfall's
+peak correlation (+0.036) is below its own 0.10 resolvability threshold.
+
+**One inversion worth carrying forward:** `floored_entmax15`, the arm built to
+be robust, is the *worst* on `gru_only` at h=4. It removes the dead-gradient
+failure but is not a free upgrade in every regime.
+
+Full write-up, tables and limits: [`docs/simplex_activations.md`](docs/simplex_activations.md).
 
 ---
 
