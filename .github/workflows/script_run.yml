@@ -1,111 +1,61 @@
-name: Run Data Pipeline and Tests
+name: Refresh dengue data pipeline
 
 on:
-  push:
-    branches:
-      - main
+  # Reads a live external dataset and creates derived files: keep this opt-in
+  # so pull-request checks remain reproducible and network-independent.
+  workflow_dispatch:
 
-  pull_request:
-    branches:
-      - main
+permissions:
+  contents: read
 
+concurrency:
+  group: data-pipeline-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-
-  run-and-test:
-
-    name: Run Scripts and Tests
-
+  run-pipeline:
+    name: Refresh source data and validate it
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
 
     steps:
-
-      # ------------------------------------
-      # 1. Checkout Repository
-      # ------------------------------------
-      - name: Checkout repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
-
-      # ------------------------------------
-      # 2. Setup Python Environment
-      # ------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
           cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-model.txt
 
-
-      # ------------------------------------
-      # 3. Display Environment Information
-      # ------------------------------------
-      - name: Check Python Version
+      - name: Show environment
         run: |
           python --version
-          pip --version
+          python -m pip --version
 
-
-      # ------------------------------------
-      # 4. Install Dependencies
-      # ------------------------------------
-      - name: Install dependencies
+      - name: Install pipeline dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-model.txt
+          python -m pip install -r requirements.txt
 
-
-      # ------------------------------------
-      # 5. Create Required Directories
-      # ------------------------------------
-      - name: Prepare project directories
+      - name: Refresh and validate dengue data
         run: |
-          mkdir -p data/raw
-          mkdir -p data/processed
-          mkdir -p results
-          mkdir -p models
-
-
-      # ------------------------------------
-      # 6. Run Data Processing Pipeline
-      # ------------------------------------
-      - name: Run Data Pipeline
-        run: |
-
-          echo "Loading dataset..."
           python scripts/data/0.load_dataset.py
-
-          echo "Validating dataset..."
           python scripts/data/1.dataset_validate.py
-
-          echo "Creating calendar features..."
           python scripts/data/2.create_calendar.py
-
-          echo "Creating spatial nodes..."
           python scripts/data/3.create_nodes.py
-
-          echo "Creating canonical dengue dataset..."
           python scripts/data/4.create_canonical_dengue.py
 
-
-      # ------------------------------------
-      # 7. Run Automated Tests
-      # ------------------------------------
-      - name: Run Tests
-        run: |
-          pytest tests/ -v
-
-
-      # ------------------------------------
-      # 8. Upload Results (Optional)
-      # ------------------------------------
-      - name: Upload Results
+      - name: Upload pipeline outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pipeline-results
+          if-no-files-found: warn
+          retention-days: 14
           path: |
             results/
-            data/processed/
+            data/interim/
