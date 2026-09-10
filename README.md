@@ -27,6 +27,7 @@ supporting runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 | 8d. Optimiser (Adam vs AdamW) and LR scheduling | Done. Neither is established; the useful result is a **mechanism finding** — a plateau scheduler and early stopping on the same metric barely interact — see §8d. |
 | 8e. Graph representation (identity / contiguity / Gaussian / learned) | Done. **No graph beats the identity control.** The Gaussian graph is worse than contiguity; a graph learned end-to-end is a wash. Closes the dual-graph precondition — see §8e. |
 | 9. Gated fusion, multi-horizon | Dual graph is now **answered negatively** by §8e. See §9 for what is left. |
+| 9. Dual graph, gated fusion, multi-horizon | Not started. See §9 for what the evidence says to do next. |
 
 **The one-paragraph summary of where the model stands:** no configuration in
 this repository beats persistence on the headline mean by a margin that isn't
@@ -756,6 +757,28 @@ is mostly the horizon.
    `scripts/26` takes `--horizon` with no further change.
 2. **Fix lag kernels to the §7 measured delays instead of learning them
    end-to-end**, paired with (1). Decouples the delay estimate from a gradient
+## 9. What the evidence says to do next
+
+Ordered by what §6–8d actually established, not by the original work plan (which
+predates the full sweep and assumed the graph was neutral). Note that §8c and
+§8d between them have now largely closed off the *training-procedure* direction:
+the hyperparameter response surface is flat and neither optimiser nor schedule
+moves the headline out of the noise. What is left is structural.
+
+1. **Test whether *any* graph beats the identity, before building on top of
+   contiguity.** §6 answered the dual-graph work plan's own stated
+   precondition, and the answer is negative — contiguity costs 1.9 MAE on every
+   fold. `adjacency.npz` already has `A_gaussian`
+   (`exp(-(d/50km)²)`, a better prior for a country this narrow — Colombo and
+   Galle are 100 km apart, share no border, and are both wet-zone coastal) —
+   test it against the identity before adding a season-gated mixture.
+2. **Multi-horizon training (h = 2, 3, 4).** `--horizon` exists and is unrun.
+   At h=1 the forecast origin carries nearly all the signal, which is *why*
+   §7's learnable lags found no gradient and why §8's fix only bites in
+   epidemic conditions. Longer horizons should make climate — and the measured
+   5–10 week delay — actually load-bearing.
+3. **Fix lag kernels to the §7 measured delays instead of learning them
+   end-to-end**, paired with (2). Decouples the delay estimate from a gradient
    that provably doesn't carry it.
 3. **A count likelihood** (negative binomial or Tweedie) instead of Gaussian-
    in-log-space. §8's reweighting is a partial, hand-built approximation to
