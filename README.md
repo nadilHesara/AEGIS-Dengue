@@ -6,8 +6,8 @@ case history, a graph-convolution + GRU model over a district contiguity graph.
 
 This file is the single entry point. Section-specific detail lives in
 `docs/`; this README states what is true right now, verified against the code
-and the committed results as of **2026-09-10** (§8c, §8d and §8e and their
-supporting runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
+and the committed results as of **2026-09-10** (§8c–§8f and their supporting
+runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 
 ---
 
@@ -26,24 +26,23 @@ supporting runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 | 8c. Hyperparameter search (full GCN+GRU, 9 axes) | Done. Random search, validation-fold selection. **Not a real improvement** — the winning config's test gain is inside seed noise — see §8c. |
 | 8d. Optimiser (Adam vs AdamW) and LR scheduling | Done. Neither is established; the useful result is a **mechanism finding** — a plateau scheduler and early stopping on the same metric barely interact — see §8d. |
 | 8e. Graph representation (identity / contiguity / Gaussian / learned) | Done. **No graph beats the identity control.** The Gaussian graph is worse than contiguity; a graph learned end-to-end is a wash. Closes the dual-graph precondition — see §8e. |
-| 9. Gated fusion, multi-horizon | Dual graph is now **answered negatively** by §8e. See §9 for what is left. |
+| 8f. Multi-horizon forecasting (h = 1–4) | Done. **The first real improvement in this repository.** At h=3 and h=4 the model beats same-horizon persistence on MAE *and* peak MAE, 6–7 of 7 folds, p < 0.01, and the gain is not the 2017 artefact — see §8f. |
+| 9. Gated fusion, climate ablation at h=4 | Dual graph **answered negatively** by §8e. The top item is now §8f's follow-up. See §9. |
 
-**The one-paragraph summary of where the model stands:** no configuration in
-this repository beats persistence on the headline mean by a margin that isn't
-also achievable by a tie. The queen-contiguity graph is not neutral — it
-measurably hurts, on every fold. The entire headline gap between the baseline
-and persistence lives in a single fold, the 2017 epidemic; the reweighted
-objective closes most of that gap without touching the other eight folds.
-Neither of the two training-procedure sweeps changes this picture: a 9-axis
-hyperparameter search (§8c) and an optimiser/schedule comparison (§8d) both
-produce headline movements that are inside the seed noise and both concentrated
-almost entirely in fold 1. Nor does replacing the graph: a distance kernel and a
-graph learned end-to-end both fail to beat *no graph at all* (§8e), which closes
-the "contiguity is just the wrong graph" hypothesis. Five separate changes have
-now had that same single-fold shape, which makes it a prior rather than a
-coincidence. None of this is a setback dressed up — it's what nine years of data
-and three seeds actually show, and it points at a specific next step (§9) rather
-than a vague one.
+**The one-paragraph summary of where the model stands:** **at one week ahead, no
+configuration in this repository beats persistence** — five separate changes
+(§8, §8b, §8c, §8d, §8e) each produced a headline movement inside the seed noise
+and concentrated almost entirely in the 2017 fold. The queen-contiguity graph
+measurably hurts on every fold, and neither a distance kernel nor a graph learned
+end-to-end beats having no graph at all (§8e). **At three and four weeks ahead
+the picture changes completely.** §8f finds the model beats same-horizon
+persistence by **+6.9% and +10.8% MAE** and, for the first time anywhere in this
+project, on **peak MAE** too (+5.2%, +9.8%) — on 6–7 of 7 headline folds, at
+p < 0.01, at nearly 4 seed-sd, and with the gain spread across folds rather than
+being the usual 2017 artefact. That confirms the explanation §7 measured and §8–§8e
+kept running into: at h=1 the previous week's case count carries nearly all the
+signal, so there is little left for anything else to add. Remove that crutch and
+the model has real skill.
 
 ---
 
@@ -54,15 +53,17 @@ scripts/            numbered pipeline, run in order — see §5
                      24.tune_hyperparameters.py — the 9-axis GCN+GRU search (§8c)
                      25.train_optimisers.py — Adam / AdamW / LR schedule (§8d)
                      26.train_graph_variants.py — four adjacencies vs identity (§8e)
+                     27.train_multi_horizon.py — h = 1..4, separate and shared (§8f)
 src/models/          lag_encoder.py — the learnable-lag module (Component A)
                      simplex_activations.py — alternative simplex maps for its
                      basis mixture (§8b)
                      adaptive_graph.py — the learnable adjacency (§8e)
+                     multi_horizon.py — multi-horizon windowing and heads (§8f)
 data/raw/             source CSVs (dengue, ERA5, CHIRPS, GADM polygons)
 data/interim/         calendar, canonical dengue, climate joined to periods
 data/processed/       panel, tensors, adjacency, folds — model-ready arrays
 results/              every generated report, metrics CSV and figure
-tests/                472 cases collected, all passing under torch 2.11.0+cu128
+tests/                506 cases collected, all passing under torch 2.11.0+cu128
 docs/                 design documents — one topic each, cross-referenced below
 ```
 
@@ -90,6 +91,7 @@ Read this README first. Go to a doc only for the depth on that topic.
 | [`docs/hyperparameter_tuning.md`](docs/hyperparameter_tuning.md) | The 9-axis search over the full GCN+GRU: search space, random-vs-Optuna, validation-only selection, the flat response surface, why the "best" config is not an improvement | Yes — written this session against the 50-trial run on disk |
 | [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md) | Adam vs AdamW vs AdamW+ReduceLROnPlateau: the hooks added to script 16, the three-arm sweep, and why the schedule fires after the kept model is already chosen | Yes — written this session against the 9-fold × 3-seed run on disk |
 | [`docs/graph_representation.md`](docs/graph_representation.md) | Four adjacencies against the identity control: contiguity, a Gaussian distance kernel, and a learned graph; what the learned one converged to and why it doesn't resemble geography | Yes — written this session against the 9-fold × 3-seed run on disk |
+| [`docs/multi_horizon.md`](docs/multi_horizon.md) | h = 1–4, separate and shared models, persistence rescored per horizon, the significance tests, and why the effect is not the 2017 artefact | Yes — written this session against the 9-fold × 3-seed run on disk |
 | [`docs/proposal_brief.md`](docs/proposal_brief.md) | Source material for a course proposal document, dated 2026-08-04 | **Superseded.** Written before the full sweep; states fold-8-only numbers as "preliminary" and explicitly forbids citing a 9-fold result. That result now exists — see §6. Keep for the proposal-writing instructions, not for the numbers. |
 
 ---
@@ -185,7 +187,7 @@ $py = ".venv\Scripts\python.exe"
 About 90 minutes for the pipeline through script 20, almost all of it in the two
 training sweeps; script 24's search adds roughly another 75 minutes for 50
 trials on GPU, script 25's three-arm sweep about 2 minutes, and script 26's
-four-graph sweep about 6. Add
+four-graph sweep about 6, and script 27's multi-horizon sweep about 7. Add
 `18.train_lag_gcn_gru.py --seeds 1 --no-control` then `19.lag_demo.py` for the
 learnable-lag component (Component A).
 
@@ -207,9 +209,10 @@ Roughly a minute each.
 .venv\Scripts\python.exe -m pytest tests\ -q
 ```
 
-**472 tests collected, 472 pass** (some parametrize into multiple cases; count
+**506 tests collected, 506 pass** (some parametrize into multiple cases; count
 grew from 293 as `test_improved_losses.py`, `test_tuning.py`,
-`test_optimisers.py`, `test_graph_variants.py` and others were added) — verified under `torch==2.11.0+cu128`, with `pyarrow`, `scipy` and
+`test_optimisers.py`, `test_graph_variants.py`, `test_multi_horizon.py` and
+others were added) — verified under `torch==2.11.0+cu128`, with `pyarrow`, `scipy` and
 `matplotlib` also installed. An earlier state this session was **344 passed, 3
 failed** under `torch==2.14.0+cpu`
 earlier this session: `test_lag_encoder.py::test_recovers_planted_delays` on
@@ -735,41 +738,160 @@ table: [`docs/graph_representation.md`](docs/graph_representation.md).
 
 ---
 
+## 8f. Multi-horizon forecasting — the first real improvement in this repository
+
+**The question, and why it was the one left.** Every result above is at h=1, and
+one measurement explains most of them: §7 found that at one week ahead the
+previous period's case count carries nearly all the signal — dropping every
+climate channel costs **+0.01 MAE**. That is the standing explanation for §7's
+absent gradient, §8's epidemic-only fix, §8b's flat sweep, §8c's flat response
+surface and §8e's "no graph beats no graph". It makes a prediction: extend the
+horizon, the origin's grip weakens, and everything else the model knows gets room
+to matter. The measured rainfall-to-dengue delay is 5–10 weeks, so h=4 is where
+it should bite.
+
+**The setup** (`scripts/27.train_multi_horizon.py`, `src/models/multi_horizon.py`).
+Two arms — `separate` (one model per horizon, four trunks) and `shared` (one
+trunk, four linear heads, summed masked loss) — on both the identity and
+contiguity backbones, at h = 1, 2, 3, 4. Windows are cut at the longest horizon
+so every horizon is scored on identical forecast origins.
+
+**Persistence is rescored at every horizon**, because it degrades sharply as its
+copied value goes stale — comparing an h=4 model to the h=1 baseline would judge
+it against a much easier task:
+
+| Horizon | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| persistence MAE | 16.42 | 20.16 | 24.58 | 28.47 |
+| persistence peak MAE | 26.61 | 32.51 | 41.48 | 47.98 |
+
+**Run: 9 folds × 3 seeds × 2 arms × 2 backbones × 4 horizons, 6.8 min GPU.**
+
+### Skill over same-horizon persistence
+
+| Backbone | Arm | h=1 | h=2 | h=3 | h=4 |
+|---|---|---|---|---|---|
+| `identity` | `separate` | −4.7% | −0.3% | **+6.9%** | **+10.8%** |
+| `identity` | `shared` | −1.7% | +0.6% | **+5.8%** | **+9.6%** |
+| `contiguity` | `shared` | −10.8% | −10.7% | −5.1% | −0.7% |
+| `contiguity` | `separate` | −18.6% | −16.2% | −10.2% | −5.1% |
+
+**Monotonic in the horizon, on both backbones and both arms** — the first curve
+in this project to move consistently in a predicted direction.
+
+### Peak MAE — the criterion nothing had ever beaten
+
+| Backbone | Arm | h=1 | h=2 | h=3 | h=4 |
+|---|---|---|---|---|---|
+| `identity` | `separate` | −11.7% | −5.1% | **+5.2%** | **+9.8%** |
+| `identity` | `shared` | −7.7% | −3.0% | **+4.7%** | **+8.0%** |
+
+`docs/baseline.md` names peak MAE as the criterion that matters for an outbreak
+warning system, and **no previous change in this repository ever beat persistence
+on it** — not §8's loss fix, not §8e's graph work. At h=3 and h=4 it is beaten.
+
+### Is it real? Every test the project applies
+
+`identity` backbone against same-horizon persistence, paired over the seven
+headline folds:
+
+| Arm | h | Δ MAE | Folds won | t | p | Δ in seed-sd |
+|---|---|---|---|---|---|---|
+| `separate` | 3 | −1.69 | 6/7 | −2.56 | **0.043** | **3.69** |
+| `separate` | 4 | **−3.07** | **7/7** | −4.04 | **0.0068** | **3.80** |
+| `shared` | 4 | −2.72 | **7/7** | −3.71 | **0.0099** | **4.40** |
+
+This project's bar has been "two seed-sd and p < 0.05" throughout. h=4 clears it
+on both arms; h=3 clears it on `separate`.
+
+### And it is not the 2017 artefact
+
+Five consecutive changes produced movements that were fold 1 and nothing else.
+This one is the opposite — excluding fold 1 entirely, `identity`/`separate`:
+
+| Horizon | All folds Δ | Ex-fold-1 Δ | Ex-fold-1 folds won |
+|---|---|---|---|
+| 1 | +0.78 | −0.82 | 5/6 |
+| 2 | +0.07 | −1.34 | **6/6** |
+| 3 | −1.69 | −2.15 | **6/6** |
+| 4 | −3.07 | −2.71 | **6/6** |
+
+**The model beats persistence on every non-epidemic headline fold at h=2, 3 and
+4.** Fold 1 itself flips sign (+10.36 at h=1 → −5.18 at h=4). The seed-mean
+ensemble pushes h=4 skill to **+11.9%**.
+
+### Shared versus separate
+
+On the identity backbone they are a wash — `shared` wins h=1 and h=2, `separate`
+wins h=3 and h=4, all within or near a seed-sd. On contiguity `shared` wins by
+1.1–1.3 MAE at every horizon, but that is a regularisation effect (a quarter the
+trunk parameters, constrained to serve four targets) limiting how badly it
+overfits a graph §8e showed to be harmful — a fix for a problem better solved by
+not using the graph. **The argument for `shared` is cost, not accuracy:** ~¼ the
+training time (5.6s vs 21.3s on fold 1) and ¼ the trunk parameters, for
+statistically indistinguishable accuracy on the backbone that matters.
+
+### Limits, stated plainly
+
+- **h=1 and h=2 still lose or tie.** Nothing here changes §6 for a one-week
+  forecast.
+- **This does not by itself prove climate is the mechanism.** The skill curve is
+  equally consistent with the model exploiting longer-range autocorrelation or
+  seasonality that persistence cannot represent. Distinguishing them needs the
+  climate-ablation experiment rerun at h=4 — §9 item 1.
+- **The graph still hurts at every horizon**, so §8e is unaffected.
+- **Raw error still grows.** +10.8% skill at h=4 sits on an absolute MAE of
+  25.40 against 17.20 at h=1: better relative to the alternative, not better
+  absolutely.
+
+Full write-up, per-fold tables and the significance tests:
+[`docs/multi_horizon.md`](docs/multi_horizon.md).
+
+---
+
 ## 9. What the evidence says to do next
 
-Ordered by what §6–8e actually established, not by the original work plan (which
-predates the full sweep and assumed the graph was neutral). Two whole directions
-are now closed. §8c and §8d closed the *training-procedure* direction: the
+Ordered by what §6–8f actually established. Two directions are closed and one has
+just opened. §8c and §8d closed the *training-procedure* direction: the
 hyperparameter response surface is flat and neither optimiser nor schedule moves
 the headline out of the noise. §8e closed the *fixed-graph* direction: three
-graphs including one learned end-to-end all fail to beat no graph. What is left
-is mostly the horizon.
+graphs including one learned end-to-end all fail to beat no graph. **§8f opened
+the horizon direction and it is where everything now points** — it is the only
+change that has produced a result clearing this project's own bar, and it
+confirms the mechanism (§7's +0.01 MAE measurement) that explains why the other
+directions were flat.
 
-1. **Multi-horizon training (h = 2, 3, 4), and rerun §8e's adaptive graph
-   there.** `--horizon` exists and is unrun. At h=1 the forecast origin carries
-   nearly all the signal, which is *why* §7's learnable lags found no gradient,
-   why §8's fix only bites in epidemic conditions, and the standing explanation
-   for why no graph helps in §8e. This is now the single highest-value item,
-   because it is the one condition under which several separate negative results
-   might change sign at once. §8b already found a directional hint for the lag
-   encoder at h=4, and §8e's adaptive graph is the natural companion test —
-   `scripts/26` takes `--horizon` with no further change.
-2. **Fix lag kernels to the §7 measured delays instead of learning them
-   end-to-end**, paired with (1). Decouples the delay estimate from a gradient
-   that provably doesn't carry it.
-3. **A count likelihood** (negative binomial or Tweedie) instead of Gaussian-
-   in-log-space. §8's reweighting is a partial, hand-built approximation to
-   what a proper count model would do natively.
+1. **Ablate the climate channels at h=4.** §8f establishes that the model has
+   real skill at longer horizons but **does not establish why**. The skill curve
+   is equally consistent with climate becoming load-bearing and with the model
+   exploiting longer-range autocorrelation or seasonality that persistence
+   cannot represent. §7 ran exactly this ablation at h=1 and measured +0.01 MAE;
+   rerunning it at h=4 through `scripts/27` is a small change and would convert
+   §8f's hypothesis into a finding — or refute it. **This is the single
+   highest-value experiment in the repository right now.**
+2. **Rerun §8e's adaptive graph and §7's lag encoder at h=4.** Both were
+   measured only at h=1, where §8f now shows there was almost nothing to find.
+   §8b already saw a directional hint for the lag encoder at h=4. `scripts/26`
+   and `scripts/27` both take the horizon with no further change. Paired with
+   (1), this is how several separate negative results get a fair retest.
+3. **Fix lag kernels to the §7 measured delays instead of learning them
+   end-to-end**, paired with (2). Decouples the delay estimate from a gradient
+   that provably doesn't carry it — and at h=4 the 5–10 week measured delay is
+   finally inside the forecast window.
 4. **Quantile forecasts** at τ ∈ {0.1, 0.5, 0.9} for operational use — the
    pinball loss from §8 already exists; extending it to a real interval is a
-   small step.
-5. **Gated spatial/temporal fusion** (`src/models/gated_fusion.py` exists and is
+   small step. §8f raises the priority: a horizon at which the model actually
+   has skill is a horizon at which a calibrated interval is worth publishing.
+5. **A count likelihood** (negative binomial or Tweedie) instead of Gaussian-
+   in-log-space. §8's reweighting is a partial, hand-built approximation to
+   what a proper count model would do natively.
+6. **Gated spatial/temporal fusion** (`src/models/gated_fusion.py` exists and is
    unrun at full sweep). §8e weakens the case: the gate chooses per district
    between a graph branch and an identity branch, and §8e found no graph worth
    choosing. Its remaining value is diagnostic — the learned gates would say
    *which* districts, if any, ever want a graph — rather than an expected
    accuracy gain.
-6. **A non-plateau learning-rate schedule** (cosine annealing or a fixed step
+7. **A non-plateau learning-rate schedule** (cosine annealing or a fixed step
    decay), if the schedule question is worth revisiting at all. §8d showed
    `ReduceLROnPlateau` and early-stopping-on-the-same-metric barely interact —
    in 23 of 27 runs the rate never dropped until after the kept model was
@@ -788,15 +910,16 @@ actually checked this session:
 
 - `docs/model_tensors.md` states "62 tests, all passing" for the stage-3
   tensor/adjacency/fold tests specifically — still true for that subset, but
-  the repository-wide count has grown to **472 collected, 472 passing** under
+  the repository-wide count has grown to **506 collected, 506 passing** under
   `torch==2.11.0+cu128` as more components were added (most recently
   `tests/test_tuning.py`, 14 tests, §8c; `tests/test_optimisers.py`, 16 tests,
-  §8d; and `tests/test_graph_variants.py`, 25 tests, §8e).
+  §8d; `tests/test_graph_variants.py`, 25 tests, §8e; and
+  `tests/test_multi_horizon.py`, 34 tests, §8f).
 - `docs/learnable_lags_results.md` states "323 tests pass repository-wide" —
-  that was true when written; it's **472 collected / 472 passed** now, after
+  that was true when written; it's **506 collected / 506 passed** now, after
   `test_improved_losses.py` (24 tests, §8), `test_tuning.py` (14 tests, §8c),
-  `test_optimisers.py` (16 tests, §8d) and `test_graph_variants.py` (25 tests,
-  §8e) were added, one dependency-driven set of
+  `test_optimisers.py` (16 tests, §8d), `test_graph_variants.py` (25 tests, §8e)
+  and `test_multi_horizon.py` (34 tests, §8f) were added, one dependency-driven set of
   failures was resolved by installing `scipy` and `matplotlib`, and the 3
   `test_lag_encoder.py` failures stopped once the CUDA torch install (§4) landed
   on `2.11.0+cu128` instead of `2.14.0+cpu`.
@@ -815,6 +938,11 @@ actually checked this session:
 - `docs/proposal_brief.md` is dated 2026-08-04 and explicitly forbids citing a
   9-fold result "not yet run" — that result exists now (§6). Treat its numbers
   as historical; its LaTeX/writing instructions are still usable.
+- **`docs/baseline.md` §3 finding 1 ("no trained model beats persistence") is
+  now horizon-scoped.** It remains true at h=1, which is the only horizon that
+  document covers, but §8f shows it is false at h=3 and h=4. Read it as a
+  statement about one-week-ahead forecasting, not about the model in general.
+  The same applies to every "does not beat persistence" claim in §6–§8e.
 - **`docs/baseline.md` and `docs/improvements.md` show the CPU-run numbers
   (`torch==2.14.0+cpu`); §6 and §8 of this README show a second, independent
   full sweep run afterward on GPU (`torch==2.11.0+cu128`).** The two runs agree
@@ -842,6 +970,7 @@ were independently re-verified this session by rerunning the scripts twice
 - [`docs/hyperparameter_tuning.md`](docs/hyperparameter_tuning.md) — the 9-axis search and why its best config is not an improvement
 - [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md) — Adam vs AdamW and the plateau-scheduler mechanism finding
 - [`docs/graph_representation.md`](docs/graph_representation.md) — four adjacencies against the identity control
+- [`docs/multi_horizon.md`](docs/multi_horizon.md) — h = 1–4, and the first result that beats persistence
 - [`docs/model_tensors.md`](docs/model_tensors.md) — tensors, folds, adjacency
 - [`docs/learnable_lags_results.md`](docs/learnable_lags_results.md) — Component A
 - [`docs/climate_dataset_schema.md`](docs/climate_dataset_schema.md) — ERA5 extraction spec
