@@ -1,5 +1,63 @@
 # AEGIS-Dengue
 
+## Repository architecture
+
+AEGIS-Dengue is an AI-based early-warning research system for district-level
+dengue prediction in Sri Lanka. The repository separates reusable implementation
+from executable experiments:
+
+```text
+src/        how the system works: reusable data, graph, model, training, and evaluation code
+scripts/    actions to run: data/, features/, graph/, training/, evaluation/
+data/       raw, processed, and external information (not committed)
+models/     checkpoints, weights, and versioned model artefacts (not committed)
+results/    figures, tables, predictions, and reports (not committed)
+configs/    data, model, and training defaults
+docs/       methodology, architecture, and reproducible workflow knowledge
+```
+
+### Installation
+
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\pip install -r requirements-model.txt
+```
+
+Install a suitable PyTorch build separately as documented in the existing setup
+section below. Configuration defaults live in `configs/*.yaml`; the established
+research scripts retain their numbered filenames for reproducibility.
+
+### Standard workflow
+
+```powershell
+# Data preparation
+python scripts/data/0.load_dataset.py
+python scripts/data/1.dataset_validate.py
+python scripts/data/2.create_calendar.py
+python scripts/data/3.create_nodes.py
+python scripts/data/4.create_canonical_dengue.py
+python scripts/data/9.aggregate_climate_to_periods.py
+python scripts/data/10.create_master_panel.py
+
+# Features and graph
+python scripts/features/12.build_model_tensors.py
+python scripts/graph/13.build_adjacency.py
+python scripts/features/14.build_folds.py
+
+# Training, evaluation, and prediction outputs
+python scripts/training/16.train_gcn_gru.py --seeds 3
+python scripts/evaluation/15.evaluate_naive_baselines.py
+
+# Prediction from a saved GCN-GRU checkpoint and prepared .npy windows
+python scripts/inference/predict_dengue.py --checkpoint models/checkpoints/model.pt --inputs data/processed/input_windows.npy
+```
+
+Training writes experiment artefacts to `results/`; store durable checkpoints
+under `models/checkpoints/`. See [docs/workflow.md](docs/workflow.md) for the
+full development flow and [CONTRIBUTING.md](CONTRIBUTING.md) for repository and
+branching rules.
+
 District-level dengue forecasting for Sri Lanka: 25 districts, 1,012 weekly
 reporting periods (2006-12-23 to 2026-05-17), ERA5-Land/CHIRPS climate plus
 case history, a graph-convolution + GRU model over a district contiguity graph.

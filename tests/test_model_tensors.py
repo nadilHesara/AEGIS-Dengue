@@ -25,7 +25,7 @@ REAL_DATA_FILES = [PANEL_PATH, NODES_PATH]
 
 spec = importlib.util.spec_from_file_location(
     "model_tensors",
-    PROJECT_DIR / "scripts" / "12.build_model_tensors.py",
+    PROJECT_DIR / "scripts" / "features" / "12.build_model_tensors.py",
 )
 tensors_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tensors_module)

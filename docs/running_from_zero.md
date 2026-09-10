@@ -83,20 +83,20 @@ Everything from here reads local files only. No network, no credentials.
 ```powershell
 # --- validation (optional, writes reports only) ---
 .venv\Scripts\python.exe scripts\1.dataset_validate.py
-.venv\Scripts\python.exe scripts\6.validate_climate_data.py
-.venv\Scripts\python.exe scripts\8.compare_era5_chirps.py
+.venv\Scripts\python.exe scripts\data\6.validate_climate_data.py
+.venv\Scripts\python.exe scripts\data\8.compare_era5_chirps.py
 
 # --- stage 1-2: calendar, districts, cases, climate, panel ---
-.venv\Scripts\python.exe scripts\2.create_calendar.py
-.venv\Scripts\python.exe scripts\4.create_canonical_dengue.py
-.venv\Scripts\python.exe scripts\9.aggregate_climate_to_periods.py
-.venv\Scripts\python.exe scripts\10.create_master_panel.py
-.venv\Scripts\python.exe scripts\11.create_imputation_comparison.py
+.venv\Scripts\python.exe scripts\data\2.create_calendar.py
+.venv\Scripts\python.exe scripts\data\4.create_canonical_dengue.py
+.venv\Scripts\python.exe scripts\data\9.aggregate_climate_to_periods.py
+.venv\Scripts\python.exe scripts\data\10.create_master_panel.py
+.venv\Scripts\python.exe scripts\data\11.create_imputation_comparison.py
 
 # --- stage 3: tensors, graph, folds ---
-.venv\Scripts\python.exe scripts\12.build_model_tensors.py
-.venv\Scripts\python.exe scripts\13.build_adjacency.py
-.venv\Scripts\python.exe scripts\14.build_folds.py
+.venv\Scripts\python.exe scripts\features\12.build_model_tensors.py
+.venv\Scripts\python.exe scripts\graph\13.build_adjacency.py
+.venv\Scripts\python.exe scripts\features\14.build_folds.py
 ```
 
 Order matters: 2 before 4 (the calendar assigns `period_id`), 4 and 9 before 10,
@@ -123,22 +123,22 @@ Expected console values, and each is a real check rather than decoration:
 
 ```powershell
 # naive baselines -- seconds
-.venv\Scripts\python.exe scripts\15.evaluate_naive_baselines.py
+.venv\Scripts\python.exe scripts\evaluation\15.evaluate_naive_baselines.py
 
 # GCN+GRU baseline, 2 variants x 2 models x 9 folds x 3 seeds  -- ~45 min
-.venv\Scripts\python.exe scripts\16.train_gcn_gru.py --seeds 3
+.venv\Scripts\python.exe scripts\training\16.train_gcn_gru.py --seeds 3
 
 # measured climate lags -- seconds
-.venv\Scripts\python.exe scripts\17.lag_correlation_scan.py
+.venv\Scripts\python.exe scripts\evaluation\17.lag_correlation_scan.py
 
 # learnable lag arms -- ~45 min
-.venv\Scripts\python.exe scripts\18.train_lag_gcn_gru.py --seeds 1 --no-control
+.venv\Scripts\python.exe scripts\training\18.train_lag_gcn_gru.py --seeds 1 --no-control
 
 # improved objectives, 5 arms x 9 folds x 3 seeds -- ~36 min
-.venv\Scripts\python.exe scripts\20.train_improved.py --seeds 3
+.venv\Scripts\python.exe scripts\training\20.train_improved.py --seeds 3
 
 # figures and walkthrough, trains nothing -- seconds
-.venv\Scripts\python.exe scripts\19.lag_demo.py
+.venv\Scripts\python.exe scripts\evaluation\19.lag_demo.py
 ```
 
 Script 19 reads what 17 and 18 wrote, so run it after them. Scripts 15, 16, 17,
@@ -149,8 +149,8 @@ For a smoke test rather than the full sweep, both training scripts take
 `--folds` and `--seeds`:
 
 ```powershell
-.venv\Scripts\python.exe scripts\16.train_gcn_gru.py --variants v1 --folds 8 --seeds 1
-.venv\Scripts\python.exe scripts\20.train_improved.py --folds 8 --seeds 1
+.venv\Scripts\python.exe scripts\training\16.train_gcn_gru.py --variants v1 --folds 8 --seeds 1
+.venv\Scripts\python.exe scripts\training\20.train_improved.py --folds 8 --seeds 1
 ```
 
 Roughly a minute each, and enough to confirm the wiring is sound.

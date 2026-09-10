@@ -23,7 +23,7 @@ NODES_PATH = PROJECT_DIR / "data" / "processed" / "nodes.csv"
 
 spec = importlib.util.spec_from_file_location(
     "build_adjacency",
-    PROJECT_DIR / "scripts" / "13.build_adjacency.py",
+    PROJECT_DIR / "scripts" / "graph" / "13.build_adjacency.py",
 )
 adjacency_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(adjacency_module)

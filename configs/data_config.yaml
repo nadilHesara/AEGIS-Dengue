@@ -1,0 +1,8 @@
+# Dataset locations and source assumptions. Paths are repository-relative.
+raw_dengue_dir: data/raw/dengue
+raw_climate_dir: data/raw/climate
+raw_geographic_dir: data/raw/geographic
+processed_dir: data/processed
+external_dir: data/external
+reporting_frequency: weekly
+district_count: 25
