@@ -13,21 +13,21 @@ runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 
 ## 1. Project status at a glance
 
-| Stage | State |
-|---|---|
-| 1. Raw climate extraction (ERA5-Land, CHIRPS) | Done. Raw CSVs committed under `data/raw/` (gitignored in a fresh clone — see §4). |
-| 2. Canonical panel (25 districts × 1,012 periods) | Done. `data/processed/panel_weekly.parquet`. |
-| 3. Model tensors, graph, walk-forward folds | Done. Rebuildable in minutes from the panel. |
-| 4. Naive baselines | Done, all 9 folds. |
-| 5. GCN+GRU baseline | **Done, full 9-fold × 3-seed sweep** (previously only fold 8 had been run — see §6). |
-| 6. Learnable climate lags (Component A) | Done. A documented **negative result with a diagnosed mechanism** — see §7. |
-| 7. Objective/loss improvements | Done. Fixes the epidemic-fold failure specifically, not the model generally — see §8. |
-| 8. Simplex activations for the lag encoder | Done. A mechanism result, not an accuracy one — see §8b. |
-| 8c. Hyperparameter search (full GCN+GRU, 9 axes) | Done. Random search, validation-fold selection. **Not a real improvement** — the winning config's test gain is inside seed noise — see §8c. |
-| 8d. Optimiser (Adam vs AdamW) and LR scheduling | Done. Neither is established; the useful result is a **mechanism finding** — a plateau scheduler and early stopping on the same metric barely interact — see §8d. |
-| 8e. Graph representation (identity / contiguity / Gaussian / learned) | Done. **No graph beats the identity control.** The Gaussian graph is worse than contiguity; a graph learned end-to-end is a wash. Closes the dual-graph precondition — see §8e. |
-| 8f. Multi-horizon forecasting (h = 1–4) | Done. **The first real improvement in this repository.** At h=3 and h=4 the model beats same-horizon persistence on MAE *and* peak MAE, 6–7 of 7 folds, p < 0.01, and the gain is not the 2017 artefact — see §8f. |
-| 9. Gated fusion, climate ablation at h=4 | Dual graph **answered negatively** by §8e. The top item is now §8f's follow-up. See §9. |
+| Stage                                                                 | State                                                                                                                                                                                                              |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1. Raw climate extraction (ERA5-Land, CHIRPS)                         | Done. Raw CSVs committed under `data/raw/` (gitignored in a fresh clone — see §4).                                                                                                                                 |
+| 2. Canonical panel (25 districts × 1,012 periods)                     | Done. `data/processed/panel_weekly.parquet`.                                                                                                                                                                       |
+| 3. Model tensors, graph, walk-forward folds                           | Done. Rebuildable in minutes from the panel.                                                                                                                                                                       |
+| 4. Naive baselines                                                    | Done, all 9 folds.                                                                                                                                                                                                 |
+| 5. GCN+GRU baseline                                                   | **Done, full 9-fold × 3-seed sweep** (previously only fold 8 had been run — see §6).                                                                                                                               |
+| 6. Learnable climate lags (Component A)                               | Done. A documented **negative result with a diagnosed mechanism** — see §7.                                                                                                                                        |
+| 7. Objective/loss improvements                                        | Done. Fixes the epidemic-fold failure specifically, not the model generally — see §8.                                                                                                                              |
+| 8. Simplex activations for the lag encoder                            | Done. A mechanism result, not an accuracy one — see §8b.                                                                                                                                                           |
+| 8c. Hyperparameter search (full GCN+GRU, 9 axes)                      | Done. Random search, validation-fold selection. **Not a real improvement** — the winning config's test gain is inside seed noise — see §8c.                                                                        |
+| 8d. Optimiser (Adam vs AdamW) and LR scheduling                       | Done. Neither is established; the useful result is a **mechanism finding** — a plateau scheduler and early stopping on the same metric barely interact — see §8d.                                                  |
+| 8e. Graph representation (identity / contiguity / Gaussian / learned) | Done. **No graph beats the identity control.** The Gaussian graph is worse than contiguity; a graph learned end-to-end is a wash. Closes the dual-graph precondition — see §8e.                                    |
+| 8f. Multi-horizon forecasting (h = 1–4)                               | Done. **The first real improvement in this repository.** At h=3 and h=4 the model beats same-horizon persistence on MAE _and_ peak MAE, 6–7 of 7 folds, p < 0.01, and the gain is not the 2017 artefact — see §8f. |
+| 9. Gated fusion, climate ablation at h=4                              | Dual graph **answered negatively** by §8e. The top item is now §8f's follow-up. See §9.                                                                                                                            |
 
 **The one-paragraph summary of where the model stands:** **at one week ahead, no
 configuration in this repository beats persistence** — five separate changes
@@ -77,22 +77,22 @@ setup.
 
 Read this README first. Go to a doc only for the depth on that topic.
 
-| Doc | Covers | Still accurate? |
-|---|---|---|
-| [`docs/running_from_zero.md`](docs/running_from_zero.md) | Every command to rebuild the project, in order, with expected checkpoint values | Yes — verified this session, every script run and confirmed |
-| [`docs/baseline.md`](docs/baseline.md) | The GCN+GRU baseline: architecture, target parameterisation, full 9-fold results, work plan | Findings accurate; exact numbers are the CPU run — README §6 has a newer GPU run, see §10 |
-| [`docs/improvements.md`](docs/improvements.md) | The objective/loss fix: diagnosis, five arms, full-sweep results, honest limits | Findings accurate; exact numbers are the CPU run — README §8 has a newer GPU run, see §10 |
-| [`docs/model_tensors.md`](docs/model_tensors.md) | Tensor shapes, windowing, fold construction, adjacency — the stage-3 reference | Yes, except the test count ("62 tests") is stale — see §10 |
-| [`docs/learnable_lags_results.md`](docs/learnable_lags_results.md) | Component A write-up: measured lags, the encoder, why end-to-end learning failed | Yes — updated this session to flag that `v1 − v0`, its benchmark target, is at best a small negative and on one backbone indistinguishable from zero (§6) |
-| [`docs/learnable_lags.md`](docs/learnable_lags.md) | The original step-by-step workplan for Component A | **Historical.** Header still says "Status: not started" — the work is done; read `learnable_lags_results.md` for outcomes, this only for the design rationale |
-| [`docs/climate_dataset_schema.md`](docs/climate_dataset_schema.md) | ERA5 extraction spec: variables, unit conversions, district aggregation, UTC handling | Yes — specification, not results, nothing to date |
-| [`docs/reporting_calendar.md`](docs/reporting_calendar.md) | Why `period_id`, not source year/week, is the only safe sort key | Yes — specification |
-| [`docs/simplex_activations.md`](docs/simplex_activations.md) | Replacing the lag encoder's softmax: five alternative simplex maps, the sparse-collapse failure mode, full sweep and limits | Yes — written this session against the run on disk |
-| [`docs/hyperparameter_tuning.md`](docs/hyperparameter_tuning.md) | The 9-axis search over the full GCN+GRU: search space, random-vs-Optuna, validation-only selection, the flat response surface, why the "best" config is not an improvement | Yes — written this session against the 50-trial run on disk |
-| [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md) | Adam vs AdamW vs AdamW+ReduceLROnPlateau: the hooks added to script 16, the three-arm sweep, and why the schedule fires after the kept model is already chosen | Yes — written this session against the 9-fold × 3-seed run on disk |
-| [`docs/graph_representation.md`](docs/graph_representation.md) | Four adjacencies against the identity control: contiguity, a Gaussian distance kernel, and a learned graph; what the learned one converged to and why it doesn't resemble geography | Yes — written this session against the 9-fold × 3-seed run on disk |
-| [`docs/multi_horizon.md`](docs/multi_horizon.md) | h = 1–4, separate and shared models, persistence rescored per horizon, the significance tests, and why the effect is not the 2017 artefact | Yes — written this session against the 9-fold × 3-seed run on disk |
-| [`docs/proposal_brief.md`](docs/proposal_brief.md) | Source material for a course proposal document, dated 2026-08-04 | **Superseded.** Written before the full sweep; states fold-8-only numbers as "preliminary" and explicitly forbids citing a 9-fold result. That result now exists — see §6. Keep for the proposal-writing instructions, not for the numbers. |
+| Doc                                                                | Covers                                                                                                                                                                              | Still accurate?                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`docs/running_from_zero.md`](docs/running_from_zero.md)           | Every command to rebuild the project, in order, with expected checkpoint values                                                                                                     | Yes — verified this session, every script run and confirmed                                                                                                                                                                                 |
+| [`docs/baseline.md`](docs/baseline.md)                             | The GCN+GRU baseline: architecture, target parameterisation, full 9-fold results, work plan                                                                                         | Findings accurate; exact numbers are the CPU run — README §6 has a newer GPU run, see §10                                                                                                                                                   |
+| [`docs/improvements.md`](docs/improvements.md)                     | The objective/loss fix: diagnosis, five arms, full-sweep results, honest limits                                                                                                     | Findings accurate; exact numbers are the CPU run — README §8 has a newer GPU run, see §10                                                                                                                                                   |
+| [`docs/model_tensors.md`](docs/model_tensors.md)                   | Tensor shapes, windowing, fold construction, adjacency — the stage-3 reference                                                                                                      | Yes, except the test count ("62 tests") is stale — see §10                                                                                                                                                                                  |
+| [`docs/learnable_lags_results.md`](docs/learnable_lags_results.md) | Component A write-up: measured lags, the encoder, why end-to-end learning failed                                                                                                    | Yes — updated this session to flag that `v1 − v0`, its benchmark target, is at best a small negative and on one backbone indistinguishable from zero (§6)                                                                                   |
+| [`docs/learnable_lags.md`](docs/learnable_lags.md)                 | The original step-by-step workplan for Component A                                                                                                                                  | **Historical.** Header still says "Status: not started" — the work is done; read `learnable_lags_results.md` for outcomes, this only for the design rationale                                                                               |
+| [`docs/climate_dataset_schema.md`](docs/climate_dataset_schema.md) | ERA5 extraction spec: variables, unit conversions, district aggregation, UTC handling                                                                                               | Yes — specification, not results, nothing to date                                                                                                                                                                                           |
+| [`docs/reporting_calendar.md`](docs/reporting_calendar.md)         | Why `period_id`, not source year/week, is the only safe sort key                                                                                                                    | Yes — specification                                                                                                                                                                                                                         |
+| [`docs/simplex_activations.md`](docs/simplex_activations.md)       | Replacing the lag encoder's softmax: five alternative simplex maps, the sparse-collapse failure mode, full sweep and limits                                                         | Yes — written this session against the run on disk                                                                                                                                                                                          |
+| [`docs/hyperparameter_tuning.md`](docs/hyperparameter_tuning.md)   | The 9-axis search over the full GCN+GRU: search space, random-vs-Optuna, validation-only selection, the flat response surface, why the "best" config is not an improvement          | Yes — written this session against the 50-trial run on disk                                                                                                                                                                                 |
+| [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md)     | Adam vs AdamW vs AdamW+ReduceLROnPlateau: the hooks added to script 16, the three-arm sweep, and why the schedule fires after the kept model is already chosen                      | Yes — written this session against the 9-fold × 3-seed run on disk                                                                                                                                                                          |
+| [`docs/graph_representation.md`](docs/graph_representation.md)     | Four adjacencies against the identity control: contiguity, a Gaussian distance kernel, and a learned graph; what the learned one converged to and why it doesn't resemble geography | Yes — written this session against the 9-fold × 3-seed run on disk                                                                                                                                                                          |
+| [`docs/multi_horizon.md`](docs/multi_horizon.md)                   | h = 1–4, separate and shared models, persistence rescored per horizon, the significance tests, and why the effect is not the 2017 artefact                                          | Yes — written this session against the 9-fold × 3-seed run on disk                                                                                                                                                                          |
+| [`docs/proposal_brief.md`](docs/proposal_brief.md)                 | Source material for a course proposal document, dated 2026-08-04                                                                                                                    | **Superseded.** Written before the full sweep; states fold-8-only numbers as "preliminary" and explicitly forbids citing a 9-fold result. That result now exists — see §6. Keep for the proposal-writing instructions, not for the numbers. |
 
 ---
 
@@ -285,13 +285,13 @@ current ones on disk**; if you rerun this on CPU or under a different torch
 build, expect the same story with small (~0.1–0.4 MAE) drift, not different
 conclusions.
 
-| Model | Features | Headline MAE | RMSE | Peak MAE | 2017 MAE | Seed sd |
-|---|---|---|---|---|---|---|
-| persistence | — | **16.42** | **33.61** | **26.61** | **36.08** | — |
-| `gru_only` | v1 | 16.68 | 35.25 | 28.06 | 42.97 | 0.53 |
-| `gru_only` | v0 | 16.86 | 35.94 | 28.43 | 43.53 | 0.39 |
-| `gcn_gru` | v0 | 18.60 | 39.68 | 29.81 | 51.87 | 0.30 |
-| `gcn_gru` | v1 | 18.98 | 40.36 | 30.36 | 54.81 | 0.68 |
+| Model       | Features | Headline MAE | RMSE      | Peak MAE  | 2017 MAE  | Seed sd |
+| ----------- | -------- | ------------ | --------- | --------- | --------- | ------- |
+| persistence | —        | **16.42**    | **33.61** | **26.61** | **36.08** | —       |
+| `gru_only`  | v1       | 16.68        | 35.25     | 28.06     | 42.97     | 0.53    |
+| `gru_only`  | v0       | 16.86        | 35.94     | 28.43     | 43.53     | 0.39    |
+| `gcn_gru`   | v0       | 18.60        | 39.68     | 29.81     | 51.87     | 0.30    |
+| `gcn_gru`   | v1       | 18.98        | 40.36     | 30.36     | 54.81     | 0.68    |
 
 Headline = mean over folds 1, 2, 3, 6, 7, 8, 9. Folds 4/5 (COVID) reported
 separately. `gru_only` is the identical model with the adjacency replaced by
@@ -314,7 +314,7 @@ the identity — the control for what the graph contributes.
    by 0.38 MAE, larger than the 0.30–0.68 seed sd — a real, if small, negative
    result for `v1`. On `gru_only`, the two GPU-run sweeps disagree with each
    other: the CPU run put `v0` ahead of `v1`, the GPU run put `v1` ahead of
-   `v0` (16.68 vs 16.86) — a 0.18 MAE gap, *smaller* than either run's seed sd
+   `v0` (16.68 vs 16.86) — a 0.18 MAE gap, _smaller_ than either run's seed sd
    (0.39–0.70). **The honest statement is that `v1 − v0` is at best negative and
    at worst indistinguishable from zero, not confidently negative on both
    backbones.** `v1 − v0` was the target Component A's learnable-lag module was
@@ -368,7 +368,7 @@ MSE over the log1p residual but is scored with MAE over raw case counts. A
 constant 0.20 log-space error is 1.3 cases at a level of 5 and 332 cases at a
 level of 1500 — the loss spends equal effort on both, while MAE counts the
 second ~250× more. Worse, the over-weighted small-count cells are also the
-*noisiest* in log space (sd 0.79 vs 0.375 for large-count cells). 14% of test
+_noisiest_ in log space (sd 0.79 vs 0.375 for large-count cells). 14% of test
 cells hold 61% of case volume. The model was optimizing the wrong objective.
 
 **The fix** (`scripts/20.train_improved.py`): five arms — Huber, level-weighted
@@ -382,14 +382,14 @@ is neutral).
 run from earlier the same day is what `docs/improvements.md` still shows. Both
 support the same conclusions with second-decimal drift.
 
-| Arm | Headline MAE | vs persistence | 2017 MAE | Seed sd |
-|---|---|---|---|---|
-| persistence | **16.42** | — | **36.08** | — |
-| **`level_weighted`** | **16.59** | −1.0% | **38.06** | 0.57 |
-| `quantile` | 17.14 | −4.4% | 42.75 | 0.36 |
-| `huber_weighted` | 17.71 | −7.9% | 46.66 | 0.51 |
-| `huber` | 18.17 | −10.7% | 49.76 | 0.65 |
-| `baseline` | 18.98 | −15.6% | 54.81 | 0.68 |
+| Arm                  | Headline MAE | vs persistence | 2017 MAE  | Seed sd |
+| -------------------- | ------------ | -------------- | --------- | ------- |
+| persistence          | **16.42**    | —              | **36.08** | —       |
+| **`level_weighted`** | **16.59**    | −1.0%          | **38.06** | 0.57    |
+| `quantile`           | 17.14        | −4.4%          | 42.75     | 0.36    |
+| `huber_weighted`     | 17.71        | −7.9%          | 46.66     | 0.51    |
+| `huber`              | 18.17        | −10.7%         | 49.76     | 0.65    |
+| `baseline`           | 18.98        | −15.6%         | 54.81     | 0.68    |
 
 Seed-mean ensemble of `level_weighted`: **16.36 MAE** against persistence's
 16.42 — a 0.06 margin, closer to a tie than the CPU run's 0.03.
@@ -421,7 +421,7 @@ Full results, per-fold tables and limits: [`docs/improvements.md`](docs/improvem
 ## 8b. Simplex activations for the lag encoder — done, mechanism result
 
 **First, a correction to a common assumption about this model.** The GCN+GRU is
-a *regression* forecaster — it predicts a case count and is scored with MAE. It
+a _regression_ forecaster — it predicts a case count and is scored with MAE. It
 has **no classification head and no output softmax**. The only softmax in the
 codebase is in `src/models/lag_encoder.py`, normalising a six-Gaussian-bump
 mixture into a delay kernel: a structural simplex constraint, not a
@@ -441,12 +441,12 @@ else.
 constant, the gradient is exactly zero, and that district-feature pair can never
 recover. Measured on fold 8 over 40 epochs:
 
-| Activation | Initial grad | Mean support | Dead pairs |
-|---|---|---|---|
-| `softmax` | 7.2e-05 | 5.73 | 2% |
-| `sparsemax` | **4.1e-04** | 1.30 | **74%** |
-| `entmax15` | 1.9e-04 | 1.90 | **58%** |
-| `floored_entmax15` | 1.8e-04 | 6.00 | **0%** |
+| Activation         | Initial grad | Mean support | Dead pairs |
+| ------------------ | ------------ | ------------ | ---------- |
+| `softmax`          | 7.2e-05      | 5.73         | 2%         |
+| `sparsemax`        | **4.1e-04**  | 1.30         | **74%**    |
+| `entmax15`         | 1.9e-04      | 1.90         | **58%**    |
+| `floored_entmax15` | 1.8e-04      | 6.00         | **0%**     |
 
 Collapse is progressive (begins ~epoch 5, compounds), so a warm-up would not
 prevent it, and it replicates on fold 1. **Do not ship bare `sparsemax` or
@@ -467,7 +467,7 @@ verdict — that test alone has now been misleading twice here.
 **And a flat result was the prediction, not a disappointment.** §7 established
 that at horizon 1 the previous period's case count carries nearly all the
 signal; dropping every climate channel costs +0.01 MAE. No change to how climate
-is *smoothed* can move a headline that climate barely enters.
+is _smoothed_ can move a headline that climate barely enters.
 
 **Horizon 4, the predicted place for a signal, shows a trend but not a result.**
 The same sweep at `--horizon 4` — where the measured 5–10 week delay should
@@ -475,7 +475,7 @@ become load-bearing — has `gumbel_softmax` on `gru_only` at +0.79 MAE over the
 control, and this time the epidemic fold is only 58% of it: the other six folds
 move **+0.38 MAE** (against +0.03 at h=1). But the paired t over folds is
 **t = +1.63**, short of significance at seven folds, and the leading arm is the
-*stochastic* one — `sparsemax` and `entmax15`, whose behaviour is understood,
+_stochastic_ one — `sparsemax` and `entmax15`, whose behaviour is understood,
 sit at +0.42 and +0.35. On `gcn_gru` there is nothing (t = +0.64, other folds
 −0.25). The honest reading: the activation matters more at longer horizons,
 directionally as predicted, but three seeds do not establish an improvement.
@@ -487,12 +487,12 @@ delay) does not separate at either horizon: at h=1, `floored_entmax15` +0.41,
 the per-fold spread (sd ≈ 0.2) still swamps the gap. Note that plain softmax
 scoring **+0.36** at h=1 sits against the **−0.16** in
 `docs/learnable_lags_results.md` — a different single-seed configuration, so not
-a contradiction, but −0.16 should not be quoted as *the* softmax number without
+a contradiction, but −0.16 should not be quoted as _the_ softmax number without
 those conditions. All of this is bounded by `scripts/17` warning that rainfall's
 peak correlation (+0.036) is below its own 0.10 resolvability threshold.
 
 **One inversion worth carrying forward:** `floored_entmax15`, the arm built to
-be robust, is the *worst* on `gru_only` at h=4. It removes the dead-gradient
+be robust, is the _worst_ on `gru_only` at h=4. It removes the dead-gradient
 failure but is not a free upgrade in every regime.
 
 Full write-up, tables and limits: [`docs/simplex_activations.md`](docs/simplex_activations.md).
@@ -510,17 +510,17 @@ missed?
 Optuna TPE backend is also wired in and used if `optuna` is installed) over nine
 axes — the full commissioned grid, **27,648 points**:
 
-| Axis | Values | Baseline |
-|---|---|---|
-| `lookback` | 8, 12, 16, 24 | 12 |
-| `gcn_hidden` | 16, 32, 64 | 32 |
-| `gcn_layers` | 1, 2 | 2 |
-| `gru_hidden` | 32, 64, 128 | 32 |
-| `gru_layers` | 1, 2 | 1 |
-| `dropout` | 0, 0.1, 0.2, 0.3 | 0.2 |
-| `learning_rate` | 1e-4, 3e-4, 1e-3, 3e-3 | 3e-3 |
-| `batch_size` | 16, 32, 64 | 64 |
-| `weight_decay` | 0, 1e-5, 1e-4, 1e-3 | 1e-4 |
+| Axis            | Values                 | Baseline |
+| --------------- | ---------------------- | -------- |
+| `lookback`      | 8, 12, 16, 24          | 12       |
+| `gcn_hidden`    | 16, 32, 64             | 32       |
+| `gcn_layers`    | 1, 2                   | 2        |
+| `gru_hidden`    | 32, 64, 128            | 32       |
+| `gru_layers`    | 1, 2                   | 1        |
+| `dropout`       | 0, 0.1, 0.2, 0.3       | 0.2      |
+| `learning_rate` | 1e-4, 3e-4, 1e-3, 3e-3 | 3e-3     |
+| `batch_size`    | 16, 32, 64             | 64       |
+| `weight_decay`  | 0, 1e-5, 1e-4, 1e-3    | 1e-4     |
 
 `gru_hidden` and `gru_layers` are knobs the baseline's `GCNGRU` does not expose
 (it ties the GRU width to the graph-conv width and hardcodes one layer), so the
@@ -545,12 +545,12 @@ Best configuration selected on validation: `lookback=16`, `gcn_hidden=32`,
 `learning_rate=3e-4`, `batch_size=32`, `weight_decay=1e-5` — validation MAE
 **14.75** against the hand-picked config's validation MAE in the same trial set.
 
-| Model | Headline MAE | Headline peak MAE | 2017 MAE | Seed sd |
-|---|---|---|---|---|
-| persistence | **16.42** | **26.61** | **36.08** | — |
-| `gru_only` v1 (README headline best) | 16.68 | 28.06 | 42.97 | — |
-| **tuned `gcn_gru` v1** | 18.23 | 29.22 | 49.54 | 0.42 |
-| baseline `gcn_gru` v1 (script 16 defaults) | 18.98 | 30.36 | 54.81 | — |
+| Model                                      | Headline MAE | Headline peak MAE | 2017 MAE  | Seed sd |
+| ------------------------------------------ | ------------ | ----------------- | --------- | ------- |
+| persistence                                | **16.42**    | **26.61**         | **36.08** | —       |
+| `gru_only` v1 (README headline best)       | 16.68        | 28.06             | 42.97     | —       |
+| **tuned `gcn_gru` v1**                     | 18.23        | 29.22             | 49.54     | 0.42    |
+| baseline `gcn_gru` v1 (script 16 defaults) | 18.98        | 30.36             | 54.81     | —       |
 
 **Did tuning improve the models? No — not by a margin this run establishes.**
 
@@ -567,7 +567,7 @@ Best configuration selected on validation: `lookback=16`, `gcn_hidden=32`,
    Tuning a backbone that §6 showed the graph actively hurts does not recover
    what the graph costs.
 3. **The response surface is flat.** Averaged over all 50 trials, mean
-   validation MAE moves ~0.1–0.2 across the *entire* rest of the grid. The only
+   validation MAE moves ~0.1–0.2 across the _entire_ rest of the grid. The only
    axes with a visible signal are "not `learning_rate=3e-3`" (15.07 vs ~14.93
    elsewhere) and "not `dropout=0`" (15.10 vs ~14.90) — and the baseline already
    sits at `dropout=0.2`. There is no rich optimum being missed; the model's
@@ -597,7 +597,7 @@ ones. AdamW applies the decay directly to the weight instead. At the baseline's
 large for the end; `ReduceLROnPlateau` removes the choice. §8c gave a specific
 reason to expect this to matter — `learning_rate` is one of only two axes with
 measurable signal in the whole 9-axis grid, and the baseline's `3e-3` is the
-*worst* of the four values tried.
+_worst_ of the four values tried.
 
 **The setup** (`scripts/25.train_optimisers.py`). Three arms — `adam` (control),
 `adamw`, `adamw_scheduled` — changing only the optimiser and the schedule.
@@ -610,31 +610,31 @@ asserted by test on both synthetic and real fold data.
 
 Early stopping keeps the baseline's patience of 15; the scheduler gets 5, so it
 can fire ~3 times before early stopping can trigger. The scheduler is stepped
-*after* early stopping has seen the epoch, so it cannot change which epoch is
+_after_ early stopping has seen the epoch, so it cannot change which epoch is
 selected as best — only what the optimiser does next.
 
 **Run: 9 folds × 3 seeds × 3 arms, 1.9 min GPU.**
 
-| Arm | Headline MAE | vs `adam` | Peak MAE | 2017 MAE | Mean best epoch | Seed sd |
-|---|---|---|---|---|---|---|
-| `adamw` | **18.67** | −0.31 | 29.89 | 52.81 | 20.0 | 0.97 |
-| `adamw_scheduled` | 18.90 | −0.08 | 30.26 | 53.98 | 19.1 | 0.73 |
-| `adam` (control) | 18.98 | — | 30.36 | 54.81 | 20.6 | 0.68 |
+| Arm               | Headline MAE | vs `adam` | Peak MAE | 2017 MAE | Mean best epoch | Seed sd |
+| ----------------- | ------------ | --------- | -------- | -------- | --------------- | ------- |
+| `adamw`           | **18.67**    | −0.31     | 29.89    | 52.81    | 20.0            | 0.97    |
+| `adamw_scheduled` | 18.90        | −0.08     | 30.26    | 53.98    | 19.1            | 0.73    |
+| `adam` (control)  | 18.98        | —         | 30.36    | 54.81    | 20.6            | 0.68    |
 
 **Neither change is established.** AdamW's −0.31 MAE is **0.38 pooled seed-sd**,
 a paired t over the seven headline folds gives **t = −1.11, p = 0.31**, it wins
 on only **4 of 7 folds**, and **91% of the gain is fold 1** — the other six folds
 move −0.03 MAE, i.e. nothing. `adamw_scheduled` is weaker still (−0.08, t =
 −0.58, p = 0.58) and its fold-1 share is **147%**, meaning the non-epidemic folds
-moved the *wrong* way. This is the fourth time a headline movement in this repo
+moved the _wrong_ way. This is the fourth time a headline movement in this repo
 has turned out to be the 2017 epidemic fold and nothing else (§8, §8b, §8c); at
 this point that is a prior, not a surprise.
 
 **The mechanism finding, which is the result worth carrying forward.** The
 learning-rate traces (`optimiser_lr_traces.csv`, all 27 scheduled runs) show
-that **in 23 of 27 runs the rate did not drop until *after* the best epoch had
+that **in 23 of 27 runs the rate did not drop until _after_ the best epoch had
 already been saved.** The reason is mechanical: `ReduceLROnPlateau` fires after 5
-epochs without improvement, and early stopping keeps the best model from *before*
+epochs without improvement, and early stopping keeps the best model from _before_
 that plateau began — so the first reduction necessarily lands inside the
 early-stopping wait, when the kept model is already fixed. On fast-converging
 folds it is absolute: fold 2 reaches its best epoch at 2–3 while the first drop
@@ -645,7 +645,7 @@ mutually exclusive as configured.** Giving a schedule a real chance requires
 either a much longer early-stopping patience (which changes the baseline protocol
 and breaks comparability with every committed number) or a schedule that does not
 wait for a plateau — cosine annealing or a fixed step decay, which reduce the
-rate *during* productive training. The second is the cleaner next test and the
+rate _during_ productive training. The second is the cleaner next test and the
 `make_scheduler` hook takes it with no further changes to script 16.
 
 Two secondary observations: AdamW does **not** converge faster (20.0 epochs vs
@@ -660,7 +660,7 @@ tests: [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md).
 ## 8e. Graph representation — done, and it closes the dual-graph question
 
 **The question.** §6 established that queen contiguity does not help, it hurts.
-That is a statement about *one* graph, and two readings survive it: either the
+That is a statement about _one_ graph, and two readings survive it: either the
 graph is wrong (contiguity is a poor prior for a country 430 km long where
 Colombo and Galle are 100 km apart, share no border, and are both wet-zone
 coastal), or there is no spatial signal to find at horizon 1. Separating them
@@ -670,30 +670,30 @@ always be the wrong fixed alternative.
 **The setup** (`scripts/26.train_graph_variants.py`, `src/models/adaptive_graph.py`).
 Four adjacencies through one GCN+GRU, changing nothing else:
 
-| Arm | Graph |
-|---|---|
-| `identity` | `I` — the control. Substituting the identity makes the graph conv a per-node linear layer, so this arm **is** `gru_only`. |
-| `contiguity` | `A_norm`, queen contiguity |
-| `gaussian` | `A_gaussian_norm`, `exp(-(d/50km)²)` on centroid distance — built by `scripts/13` and never before trained on |
-| `adaptive` | learned end-to-end: `softmax(relu(E1 @ E2ᵀ))`, two `[25, 8]` embedding tables, 400 parameters |
+| Arm          | Graph                                                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `identity`   | `I` — the control. Substituting the identity makes the graph conv a per-node linear layer, so this arm **is** `gru_only`. |
+| `contiguity` | `A_norm`, queen contiguity                                                                                                |
+| `gaussian`   | `A_gaussian_norm`, `exp(-(d/50km)²)` on centroid distance — built by `scripts/13` and never before trained on             |
+| `adaptive`   | learned end-to-end: `softmax(relu(E1 @ E2ᵀ))`, two `[25, 8]` embedding tables, 400 parameters                             |
 
 **The reference is `identity`, not `contiguity`** — contiguity already loses to
 doing nothing, so beating it would establish nothing. Both controls reproduce
 their committed numbers exactly (`identity` fold 1 = 42.97 = `gru_only` v1;
 `contiguity` = 54.81 = `gcn_gru` v1). The adaptive arm's graph learning rate has
 a documented failure mode at both ends — at 1× the embeddings never leave their
-uniform initialisation and the arm scores *worse* than the control; at 10× the
+uniform initialisation and the arm scores _worse_ than the control; at 10× the
 graph collapses toward one-hot rows — so it is **selected per fold on the
 validation split** from {1, 3, 10, 30}×, never on test.
 
 **Run: 9 folds × 3 seeds × 4 arms, 6.2 min GPU.**
 
-| Arm | Headline MAE | vs `identity` | Peak MAE | 2017 MAE | Folds improved | p | Seed sd |
-|---|---|---|---|---|---|---|---|
-| `adaptive` | **16.61** | −0.07 | 28.08 | **40.69** | 2/7 | 0.85 | 0.39 |
-| `identity` (control) | 16.68 | — | 28.06 | 42.97 | — | — | 0.53 |
-| `contiguity` | 18.98 | +2.30 | 30.36 | 54.81 | 0/7 | 0.20 | 0.68 |
-| `gaussian` | 19.25 | +2.57 | 30.89 | 56.81 | 0/7 | 0.22 | 0.46 |
+| Arm                  | Headline MAE | vs `identity` | Peak MAE | 2017 MAE  | Folds improved | p    | Seed sd |
+| -------------------- | ------------ | ------------- | -------- | --------- | -------------- | ---- | ------- |
+| `adaptive`           | **16.61**    | −0.07         | 28.08    | **40.69** | 2/7            | 0.85 | 0.39    |
+| `identity` (control) | 16.68        | —             | 28.06    | 42.97     | —              | —    | 0.53    |
+| `contiguity`         | 18.98        | +2.30         | 30.36    | 54.81     | 0/7            | 0.20 | 0.68    |
+| `gaussian`           | 19.25        | +2.57         | 30.89    | 56.81     | 0/7            | 0.22 | 0.46    |
 
 **No graph beats no graph.** That is the answer.
 
@@ -725,7 +725,7 @@ did — and **peak MAE still loses** (27.47 vs 26.61), which is the criterion an
 outbreak warning system is judged on.
 
 **What this closes.** `docs/baseline.md` §4 item 7 required establishing that
-*some* graph beats the identity before building a season-gated dual graph. That
+_some_ graph beats the identity before building a season-gated dual graph. That
 precondition is now tested and **not met**: a border graph, a distance kernel and
 a graph learned from the loss itself all fail. Building a gated mixture of two
 components that each lose to the identity would be building on a measured
@@ -760,31 +760,31 @@ so every horizon is scored on identical forecast origins.
 copied value goes stale — comparing an h=4 model to the h=1 baseline would judge
 it against a much easier task:
 
-| Horizon | 1 | 2 | 3 | 4 |
-|---|---|---|---|---|
-| persistence MAE | 16.42 | 20.16 | 24.58 | 28.47 |
+| Horizon              | 1     | 2     | 3     | 4     |
+| -------------------- | ----- | ----- | ----- | ----- |
+| persistence MAE      | 16.42 | 20.16 | 24.58 | 28.47 |
 | persistence peak MAE | 26.61 | 32.51 | 41.48 | 47.98 |
 
 **Run: 9 folds × 3 seeds × 2 arms × 2 backbones × 4 horizons, 6.8 min GPU.**
 
 ### Skill over same-horizon persistence
 
-| Backbone | Arm | h=1 | h=2 | h=3 | h=4 |
-|---|---|---|---|---|---|
-| `identity` | `separate` | −4.7% | −0.3% | **+6.9%** | **+10.8%** |
-| `identity` | `shared` | −1.7% | +0.6% | **+5.8%** | **+9.6%** |
-| `contiguity` | `shared` | −10.8% | −10.7% | −5.1% | −0.7% |
-| `contiguity` | `separate` | −18.6% | −16.2% | −10.2% | −5.1% |
+| Backbone     | Arm        | h=1    | h=2    | h=3       | h=4        |
+| ------------ | ---------- | ------ | ------ | --------- | ---------- |
+| `identity`   | `separate` | −4.7%  | −0.3%  | **+6.9%** | **+10.8%** |
+| `identity`   | `shared`   | −1.7%  | +0.6%  | **+5.8%** | **+9.6%**  |
+| `contiguity` | `shared`   | −10.8% | −10.7% | −5.1%     | −0.7%      |
+| `contiguity` | `separate` | −18.6% | −16.2% | −10.2%    | −5.1%      |
 
 **Monotonic in the horizon, on both backbones and both arms** — the first curve
 in this project to move consistently in a predicted direction.
 
 ### Peak MAE — the criterion nothing had ever beaten
 
-| Backbone | Arm | h=1 | h=2 | h=3 | h=4 |
-|---|---|---|---|---|---|
+| Backbone   | Arm        | h=1    | h=2   | h=3       | h=4       |
+| ---------- | ---------- | ------ | ----- | --------- | --------- |
 | `identity` | `separate` | −11.7% | −5.1% | **+5.2%** | **+9.8%** |
-| `identity` | `shared` | −7.7% | −3.0% | **+4.7%** | **+8.0%** |
+| `identity` | `shared`   | −7.7%  | −3.0% | **+4.7%** | **+8.0%** |
 
 `docs/baseline.md` names peak MAE as the criterion that matters for an outbreak
 warning system, and **no previous change in this repository ever beat persistence
@@ -795,11 +795,11 @@ on it** — not §8's loss fix, not §8e's graph work. At h=3 and h=4 it is beat
 `identity` backbone against same-horizon persistence, paired over the seven
 headline folds:
 
-| Arm | h | Δ MAE | Folds won | t | p | Δ in seed-sd |
-|---|---|---|---|---|---|---|
-| `separate` | 3 | −1.69 | 6/7 | −2.56 | **0.043** | **3.69** |
-| `separate` | 4 | **−3.07** | **7/7** | −4.04 | **0.0068** | **3.80** |
-| `shared` | 4 | −2.72 | **7/7** | −3.71 | **0.0099** | **4.40** |
+| Arm        | h   | Δ MAE     | Folds won | t     | p          | Δ in seed-sd |
+| ---------- | --- | --------- | --------- | ----- | ---------- | ------------ |
+| `separate` | 3   | −1.69     | 6/7       | −2.56 | **0.043**  | **3.69**     |
+| `separate` | 4   | **−3.07** | **7/7**   | −4.04 | **0.0068** | **3.80**     |
+| `shared`   | 4   | −2.72     | **7/7**   | −3.71 | **0.0099** | **4.40**     |
 
 This project's bar has been "two seed-sd and p < 0.05" throughout. h=4 clears it
 on both arms; h=3 clears it on `separate`.
@@ -810,14 +810,13 @@ Five consecutive changes produced movements that were fold 1 and nothing else.
 This one is the opposite — excluding fold 1 entirely, `identity`/`separate`:
 
 | Horizon | All folds Δ | Ex-fold-1 Δ | Ex-fold-1 folds won |
-|---|---|---|---|
-| 1 | +0.78 | −0.82 | 5/6 |
-| 2 | +0.07 | −1.34 | **6/6** |
-| 3 | −1.69 | −2.15 | **6/6** |
-| 4 | −3.07 | −2.71 | **6/6** |
+| ------- | ----------- | ----------- | ------------------- |
+| 1       | +0.78       | −0.82       | 5/6                 |
+| 2       | +0.07       | −1.34       | **6/6**             |
+| 3       | −1.69       | −2.15       | **6/6**             |
+| 4       | −3.07       | −2.71       | **6/6**             |
 
-**The model beats persistence on every non-epidemic headline fold at h=2, 3 and
-4.** Fold 1 itself flips sign (+10.36 at h=1 → −5.18 at h=4). The seed-mean
+**The model beats persistence on every non-epidemic headline fold at h=2, 3 and 4.** Fold 1 itself flips sign (+10.36 at h=1 → −5.18 at h=4). The seed-mean
 ensemble pushes h=4 skill to **+11.9%**.
 
 ### Shared versus separate
@@ -852,32 +851,27 @@ Full write-up, per-fold tables and the significance tests:
 ## 9. What the evidence says to do next
 
 Ordered by what §6–8f actually established. Two directions are closed and one has
-just opened. §8c and §8d closed the *training-procedure* direction: the
+just opened. §8c and §8d closed the _training-procedure_ direction: the
 hyperparameter response surface is flat and neither optimiser nor schedule moves
-the headline out of the noise. §8e closed the *fixed-graph* direction: three
-graphs including one learned end-to-end all fail to beat no graph. **§8f opened
-the horizon direction and it is where everything now points** — it is the only
-change that has produced a result clearing this project's own bar, and it
-confirms the mechanism (§7's +0.01 MAE measurement) that explains why the other
-directions were flat.
+the headline out of the noise. §8e closed the _fixed-graph_ direction: three
+graphs including one learned end-to-end all fail to beat no graph. What is left
+is mostly the horizon.
 
-1. **Ablate the climate channels at h=4.** §8f establishes that the model has
-   real skill at longer horizons but **does not establish why**. The skill curve
-   is equally consistent with climate becoming load-bearing and with the model
-   exploiting longer-range autocorrelation or seasonality that persistence
-   cannot represent. §7 ran exactly this ablation at h=1 and measured +0.01 MAE;
-   rerunning it at h=4 through `scripts/27` is a small change and would convert
-   §8f's hypothesis into a finding — or refute it. **This is the single
-   highest-value experiment in the repository right now.**
-2. **Rerun §8e's adaptive graph and §7's lag encoder at h=4.** Both were
-   measured only at h=1, where §8f now shows there was almost nothing to find.
-   §8b already saw a directional hint for the lag encoder at h=4. `scripts/26`
-   and `scripts/27` both take the horizon with no further change. Paired with
-   (1), this is how several separate negative results get a fair retest.
-3. **Fix lag kernels to the §7 measured delays instead of learning them
-   end-to-end**, paired with (2). Decouples the delay estimate from a gradient
-   that provably doesn't carry it — and at h=4 the 5–10 week measured delay is
-   finally inside the forecast window.
+1. **Multi-horizon training (h = 2, 3, 4), and rerun §8e's adaptive graph
+   there.** `--horizon` exists and is unrun. At h=1 the forecast origin carries
+   nearly all the signal, which is _why_ §7's learnable lags found no gradient,
+   why §8's fix only bites in epidemic conditions, and the standing explanation
+   for why no graph helps in §8e. This is now the single highest-value item,
+   because it is the one condition under which several separate negative results
+   might change sign at once. §8b already found a directional hint for the lag
+   encoder at h=4, and §8e's adaptive graph is the natural companion test —
+   `scripts/26` takes `--horizon` with no further change.
+2. **Fix lag kernels to the §7 measured delays instead of learning them
+   end-to-end**, paired with (1). Decouples the delay estimate from a gradient
+   that provably doesn't carry it.
+3. **A count likelihood** (negative binomial or Tweedie) instead of Gaussian-
+   in-log-space. §8's reweighting is a partial, hand-built approximation to
+   what a proper count model would do natively.
 4. **Quantile forecasts** at τ ∈ {0.1, 0.5, 0.9} for operational use — the
    pinball loss from §8 already exists; extending it to a real interval is a
    small step. §8f raises the priority: a horizon at which the model actually
@@ -889,13 +883,13 @@ directions were flat.
    unrun at full sweep). §8e weakens the case: the gate chooses per district
    between a graph branch and an identity branch, and §8e found no graph worth
    choosing. Its remaining value is diagnostic — the learned gates would say
-   *which* districts, if any, ever want a graph — rather than an expected
+   _which_ districts, if any, ever want a graph — rather than an expected
    accuracy gain.
 7. **A non-plateau learning-rate schedule** (cosine annealing or a fixed step
    decay), if the schedule question is worth revisiting at all. §8d showed
    `ReduceLROnPlateau` and early-stopping-on-the-same-metric barely interact —
    in 23 of 27 runs the rate never dropped until after the kept model was
-   already chosen — so a schedule that reduces the rate *during* productive
+   already chosen — so a schedule that reduces the rate _during_ productive
    training is the only version of this idea that has a mechanism to work
    through. `scripts/25`'s `make_scheduler` hook takes one with no further
    change to script 16. Low priority: §8d's accuracy result gives no reason to
