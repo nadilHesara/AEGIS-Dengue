@@ -109,6 +109,10 @@ DEFAULTS = {
     "max_epochs": 150,
     "patience": 15,
     "seeds": 3,
+    # Both default to the committed baseline's behaviour: no schedule, and no
+    # floor on when early stopping may fire. See make_scheduler and train_one.
+    "scheduler": "none",
+    "min_epochs": 0,
 }
 
 
@@ -343,6 +347,42 @@ def parameter_groups(model: nn.Module, config: dict) -> list[dict]:
     ]
 
 
+def make_scheduler(optimiser, config: dict):
+    """Return the learning-rate schedule named in config, or None.
+
+    Defaults to none, which is what the committed baseline ran. A schedule is
+    worth having here because a fold holds 459 to 877 training windows, so at
+    batch 64 an epoch is only 8 to 14 optimiser steps: the whole run is a few
+    hundred steps, and a constant rate has very little room to settle.
+
+        cosine    anneal from the configured rate to 2% of it over max_epochs
+        plateau   halve the rate when validation stops improving, which fires
+                  well before the early-stopping patience does
+    """
+
+    kind = config.get("scheduler", "none")
+
+    if kind == "none":
+        return None
+
+    if kind == "cosine":
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimiser,
+            T_max=config["max_epochs"],
+            eta_min=config["learning_rate"] * 0.02,
+        )
+
+    if kind == "plateau":
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimiser,
+            mode="min",
+            factor=0.5,
+            patience=max(1, config["patience"] // 3),
+        )
+
+    raise ValueError(f"Unknown scheduler {kind!r}.")
+
+
 def train_one(
     arrays: dict[str, dict[str, np.ndarray]],
     adjacency: np.ndarray,
@@ -398,6 +438,8 @@ def train_one(
         weight_decay=config["weight_decay"],
     )
 
+    scheduler = make_scheduler(optimiser, config)
+
     best_loss = float("inf")
     best_state = copy.deepcopy(model.state_dict())
     best_epoch = 0
@@ -406,10 +448,28 @@ def train_one(
     n_train = len(x_train)
     generator = torch.Generator().manual_seed(seed)
 
+    # Per-epoch curves, recorded so the training dynamics can be inspected
+    # rather than inferred from the final number. Nothing here changes what is
+    # trained; `best_epoch` alone cannot distinguish a model that converged
+    # from one that stopped on a flat stretch.
+    history: dict[str, list[float]] = {
+        "epoch": [],
+        "train_loss": [],
+        "val_loss": [],
+        "learning_rate": [],
+    }
+
+    # A floor on when early stopping may fire. Zero by default, which is the
+    # committed behaviour. It exists because validation here is a single
+    # calendar year -- 52 windows -- and a flat stretch early in training is
+    # easily mistaken for convergence on a signal that short.
+    min_epochs = int(config.get("min_epochs", 0))
+
     for epoch in range(1, config["max_epochs"] + 1):
         model.train()
         order = torch.randperm(n_train, generator=generator).to(device)
 
+        batch_losses = []
         for start in range(0, n_train, config["batch_size"]):
             batch = order[start : start + config["batch_size"]]
 
@@ -421,6 +481,7 @@ def train_one(
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimiser.step()
+            batch_losses.append(loss.item())
 
         model.eval()
         with torch.no_grad():
@@ -428,12 +489,23 @@ def train_one(
                 model(x_val, adjacency_tensor), y_val, mask_val.unsqueeze(-1)
             ).item()
 
+        history["epoch"].append(epoch)
+        history["train_loss"].append(float(np.mean(batch_losses)))
+        history["val_loss"].append(validation)
+        history["learning_rate"].append(optimiser.param_groups[0]["lr"])
+
+        if scheduler is not None:
+            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                scheduler.step(validation)
+            else:
+                scheduler.step()
+
         if validation < best_loss - 1e-6:
             best_loss, best_epoch, waited = validation, epoch, 0
             best_state = copy.deepcopy(model.state_dict())
         else:
             waited += 1
-            if waited >= config["patience"]:
+            if epoch >= min_epochs and waited >= config["patience"]:
                 break
 
     model.load_state_dict(best_state)
@@ -442,6 +514,7 @@ def train_one(
         "best_epoch": best_epoch,
         "epochs_run": epoch,
         "val_loss": best_loss,
+        "history": history,
     }
 
 
