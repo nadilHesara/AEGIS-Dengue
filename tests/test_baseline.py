@@ -38,8 +38,8 @@ def load(name, filename):
     return module
 
 
-naive = load("naive_baselines", "15.evaluate_naive_baselines.py")
-trainer = load("train_gcn_gru", "16.train_gcn_gru.py")
+naive = load("naive_baselines", "evaluation/15.evaluate_naive_baselines.py")
+trainer = load("train_gcn_gru", "training/16.train_gcn_gru.py")
 trainer.load_modules()
 
 

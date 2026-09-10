@@ -21,7 +21,7 @@ import pytest
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 spec = importlib.util.spec_from_file_location(
-    "validate_climate", PROJECT_DIR / "scripts" / "6.validate_climate_data.py"
+    "validate_climate", PROJECT_DIR / "scripts" / "data" / "6.validate_climate_data.py"
 )
 validator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validator)

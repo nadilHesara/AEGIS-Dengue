@@ -2,6 +2,17 @@
 
 data
 
+!data/
+!data/raw/
+!data/raw/dengue/
+!data/raw/dengue/.gitkeep
+!data/raw/climate/
+!data/raw/climate/.gitkeep
+!data/raw/geographic/
+!data/raw/geographic/.gitkeep
+!data/external/
+!data/external/.gitkeep
+
 scripts/__pycache__
 
 __pycache__/
@@ -10,3 +21,20 @@ __pycache__/
 
 
 results/
+
+!results/
+!results/figures/
+!results/figures/.gitkeep
+!results/tables/
+!results/tables/.gitkeep
+!results/predictions/
+!results/predictions/.gitkeep
+!results/reports/
+!results/reports/.gitkeep
+
+models/checkpoints/*
+!models/checkpoints/.gitkeep
+models/weights/*
+!models/weights/.gitkeep
+models/versions/*
+!models/versions/.gitkeep

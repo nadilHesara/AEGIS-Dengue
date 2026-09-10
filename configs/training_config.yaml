@@ -1,0 +1,10 @@
+training:
+  learning_rate: 0.003
+  weight_decay: 0.0001
+  batch_size: 64
+  max_epochs: 150
+  patience: 15
+  seeds: 3
+artifacts:
+  checkpoints_dir: models/checkpoints
+  predictions_dir: results/predictions

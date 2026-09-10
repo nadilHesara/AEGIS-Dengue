@@ -23,7 +23,7 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 spec = importlib.util.spec_from_file_location(
     "aggregate_climate",
-    PROJECT_DIR / "scripts" / "9.aggregate_climate_to_periods.py",
+    PROJECT_DIR / "scripts" / "data" / "9.aggregate_climate_to_periods.py",
 )
 aggregate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(aggregate)
@@ -657,7 +657,7 @@ def test_no_shift_is_used_in_aggregation():
     """
 
     source = (
-        PROJECT_DIR / "scripts" / "9.aggregate_climate_to_periods.py"
+        PROJECT_DIR / "scripts" / "data" / "9.aggregate_climate_to_periods.py"
     ).read_text(encoding="utf-8")
 
     assert ".shift(" not in source

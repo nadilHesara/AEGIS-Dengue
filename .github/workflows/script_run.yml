@@ -26,11 +26,11 @@ jobs:
 
             - name: Run Scripts
               run: |
-                python scripts/0.load_dataset.py
-                python scripts/1.dataset_validate.py
-                python scripts/2.create_calendar.py
-                python scripts/3.create_nodes.py
-                python scripts/4.create_canonical_dengue.py
+                python scripts/data/0.load_dataset.py
+                python scripts/data/1.dataset_validate.py
+                python scripts/data/2.create_calendar.py
+                python scripts/data/3.create_nodes.py
+                python scripts/data/4.create_canonical_dengue.py
 
             - name: Check tests
               run: |

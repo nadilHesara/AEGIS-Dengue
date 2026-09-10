@@ -41,8 +41,8 @@ def _load(name: str, filename: str):
     return module
 
 
-improved = _load("improved_module", "20.train_improved.py")
-baseline = _load("baseline_for_tests", "16.train_gcn_gru.py")
+improved = _load("improved_module", "training/20.train_improved.py")
+baseline = _load("baseline_for_tests", "training/16.train_gcn_gru.py")
 
 
 # ---------------------------------------------------------------------------
