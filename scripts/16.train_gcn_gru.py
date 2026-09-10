@@ -383,6 +383,21 @@ def make_scheduler(optimiser, config: dict):
     raise ValueError(f"Unknown scheduler {kind!r}.")
 
 
+def build_optimiser(model: nn.Module, config: dict) -> torch.optim.Optimizer:
+    """Return the optimiser for one training run. Adam, as the baseline defines it.
+
+    Split out so a variant can substitute a different optimiser without copying
+    the training loop. `scripts/25.train_optimisers.py` passes its own version of
+    this to compare AdamW; anything that does not pass one gets exactly this.
+    """
+
+    return torch.optim.Adam(
+        parameter_groups(model, config),
+        lr=config["learning_rate"],
+        weight_decay=config["weight_decay"],
+    )
+
+
 def train_one(
     arrays: dict[str, dict[str, np.ndarray]],
     adjacency: np.ndarray,
@@ -390,6 +405,8 @@ def train_one(
     seed: int,
     device: torch.device,
     build_model=None,
+    make_optimiser=None,
+    make_scheduler=None,
 ) -> tuple[nn.Module, dict]:
     """Train one model on one fold with one seed, early stopping on validation.
 
@@ -397,6 +414,15 @@ def train_one(
     It defaults to the plain GCN+GRU. The hook exists so a variant can reuse this
     loop verbatim rather than copying it: an experiment that reimplements early
     stopping or the optimiser is no longer comparable to this baseline.
+
+    `make_optimiser(model, config)` and `make_scheduler(optimiser, config)` are
+    the same idea for the optimisation half. Both default to the baseline's
+    behaviour -- Adam, and no scheduler -- so a caller that passes neither gets
+    the committed configuration unchanged. When a scheduler is given it is
+    stepped once per epoch on the **validation** loss, after early stopping has
+    seen it, which is the only sensible order: stepping on the training loss
+    would reduce the rate on a quantity the model is already minimising by
+    construction.
     """
 
     torch.manual_seed(seed)
@@ -432,18 +458,21 @@ def train_one(
 
     model = model.to(device)
 
-    optimiser = torch.optim.Adam(
-        parameter_groups(model, config),
-        lr=config["learning_rate"],
-        weight_decay=config["weight_decay"],
-    )
+    if make_optimiser is None:
+        optimiser = build_optimiser(model, config)
+    else:
+        optimiser = make_optimiser(model, config)
 
-    scheduler = make_scheduler(optimiser, config)
+    scheduler = None if make_scheduler is None else make_scheduler(optimiser, config)
 
     best_loss = float("inf")
     best_state = copy.deepcopy(model.state_dict())
     best_epoch = 0
     waited = 0
+
+    # Recorded so an experiment can show the schedule actually moved rather than
+    # asserting it did. Empty for the unscheduled baseline path.
+    learning_rates: list[float] = []
 
     n_train = len(x_train)
     generator = torch.Generator().manual_seed(seed)
@@ -508,13 +537,23 @@ def train_one(
             if epoch >= min_epochs and waited >= config["patience"]:
                 break
 
+        if scheduler is not None:
+            # Stepped after early stopping has already seen this epoch's
+            # validation loss, so adding a scheduler cannot change which epoch
+            # is selected as best -- only what the optimiser does next.
+            learning_rates.append(optimiser.param_groups[0]["lr"])
+            scheduler.step(validation)
+
     model.load_state_dict(best_state)
 
     return model, {
         "best_epoch": best_epoch,
         "epochs_run": epoch,
         "val_loss": best_loss,
-        "history": history,
+        "learning_rates": learning_rates,
+        "final_lr": (
+            optimiser.param_groups[0]["lr"] if learning_rates else float("nan")
+        ),
     }
 
 
