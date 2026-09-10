@@ -6,7 +6,8 @@ case history, a graph-convolution + GRU model over a district contiguity graph.
 
 This file is the single entry point. Section-specific detail lives in
 `docs/`; this README states what is true right now, verified against the code
-and the committed results as of **2026-09-09**.
+and the committed results as of **2026-09-10** (§8c and its supporting run
+added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 
 ---
 
@@ -22,6 +23,7 @@ and the committed results as of **2026-09-09**.
 | 6. Learnable climate lags (Component A) | Done. A documented **negative result with a diagnosed mechanism** — see §7. |
 | 7. Objective/loss improvements | Done. Fixes the epidemic-fold failure specifically, not the model generally — see §8. |
 | 8. Simplex activations for the lag encoder | Done. A mechanism result, not an accuracy one — see §8b. |
+| 8c. Hyperparameter search (full GCN+GRU, 9 axes) | Done. Random search, validation-fold selection. **Not a real improvement** — the winning config's test gain is inside seed noise — see §8c. |
 | 9. Dual graph, gated fusion, multi-horizon | Not started. See §9 for what the evidence says to do next. |
 
 **The one-paragraph summary of where the model stands:** no configuration in
@@ -29,9 +31,13 @@ this repository beats persistence on the headline mean by a margin that isn't
 also achievable by a tie. The queen-contiguity graph is not neutral — it
 measurably hurts, on every fold. The entire headline gap between the baseline
 and persistence lives in a single fold, the 2017 epidemic; the reweighted
-objective closes most of that gap without touching the other eight folds. None
-of this is a setback dressed up — it's what nine years of data and three seeds
-actually show, and it points at a specific next step (§9) rather than a vague one.
+objective closes most of that gap without touching the other eight folds. A
+9-axis hyperparameter search over the full GCN+GRU (§8c) does not change this
+picture: its validation-selected best config improves the like-for-like baseline
+by 4% on the test headline, which is inside the seed noise, and still loses to
+both the no-graph control and persistence. None of this is a setback dressed up —
+it's what nine years of data and three seeds actually show, and it points at a
+specific next step (§9) rather than a vague one.
 
 ---
 
@@ -39,6 +45,7 @@ actually show, and it points at a specific next step (§9) rather than a vague o
 
 ```
 scripts/            numbered pipeline, run in order — see §5
+                     24.tune_hyperparameters.py — the 9-axis GCN+GRU search (§8c)
 src/models/          lag_encoder.py — the learnable-lag module (Component A)
                      simplex_activations.py — alternative simplex maps for its
                      basis mixture (§8b)
@@ -46,7 +53,7 @@ data/raw/             source CSVs (dengue, ERA5, CHIRPS, GADM polygons)
 data/interim/         calendar, canonical dengue, climate joined to periods
 data/processed/       panel, tensors, adjacency, folds — model-ready arrays
 results/              every generated report, metrics CSV and figure
-tests/                417 parametrized cases, all passing under torch 2.11.0+cu128
+tests/                431 cases collected, all passing under torch 2.11.0+cu128
 docs/                 design documents — one topic each, cross-referenced below
 ```
 
@@ -71,6 +78,7 @@ Read this README first. Go to a doc only for the depth on that topic.
 | [`docs/climate_dataset_schema.md`](docs/climate_dataset_schema.md) | ERA5 extraction spec: variables, unit conversions, district aggregation, UTC handling | Yes — specification, not results, nothing to date |
 | [`docs/reporting_calendar.md`](docs/reporting_calendar.md) | Why `period_id`, not source year/week, is the only safe sort key | Yes — specification |
 | [`docs/simplex_activations.md`](docs/simplex_activations.md) | Replacing the lag encoder's softmax: five alternative simplex maps, the sparse-collapse failure mode, full sweep and limits | Yes — written this session against the run on disk |
+| [`docs/hyperparameter_tuning.md`](docs/hyperparameter_tuning.md) | The 9-axis search over the full GCN+GRU: search space, random-vs-Optuna, validation-only selection, the flat response surface, why the "best" config is not an improvement | Yes — written this session against the 50-trial run on disk |
 | [`docs/proposal_brief.md`](docs/proposal_brief.md) | Source material for a course proposal document, dated 2026-08-04 | **Superseded.** Written before the full sweep; states fold-8-only numbers as "preliminary" and explicitly forbids citing a 9-fold result. That result now exists — see §6. Keep for the proposal-writing instructions, not for the numbers. |
 
 ---
@@ -159,9 +167,12 @@ $py = ".venv\Scripts\python.exe"
 & $py scripts\16.train_gcn_gru.py --seeds 3
 & $py scripts\17.lag_correlation_scan.py
 & $py scripts\20.train_improved.py --seeds 3
+& $py scripts\24.tune_hyperparameters.py --n-trials 50
 ```
 
-About 90 minutes, almost all of it in the two training sweeps. Add
+About 90 minutes for the pipeline through script 20, almost all of it in the two
+training sweeps; script 24's search adds roughly another 75 minutes for 50
+trials on GPU. Add
 `18.train_lag_gcn_gru.py --seeds 1 --no-control` then `19.lag_demo.py` for the
 learnable-lag component (Component A).
 
@@ -171,6 +182,7 @@ For a smoke test rather than a full sweep, both training scripts accept
 ```powershell
 & $py scripts\16.train_gcn_gru.py --variants v1 --folds 8 --seeds 1
 & $py scripts\20.train_improved.py --folds 8 --seeds 1
+& $py scripts\24.tune_hyperparameters.py --tune-folds 8 --n-trials 5 --trial-seeds 1 --final-seeds 1
 ```
 
 Roughly a minute each.
@@ -181,9 +193,11 @@ Roughly a minute each.
 .venv\Scripts\python.exe -m pytest tests\ -q
 ```
 
-**293 tests collected, 347 pass** (some parametrize into multiple cases) —
-verified under `torch==2.11.0+cu128`, with `pyarrow`, `scipy` and `matplotlib`
-also installed. This was **344 passed, 3 failed** under `torch==2.14.0+cpu`
+**431 tests collected, 431 pass** (some parametrize into multiple cases; count
+grew from 293 as `test_improved_losses.py`, `test_tuning.py` and others were
+added) — verified under `torch==2.11.0+cu128`, with `pyarrow`, `scipy` and
+`matplotlib` also installed. An earlier state this session was **344 passed, 3
+failed** under `torch==2.14.0+cpu`
 earlier this session: `test_lag_encoder.py::test_recovers_planted_delays` on
 all three seeds, the encoder recovering planted delays to within 2.3 periods
 against a 2.0 threshold. That's a tolerance question tied to the exact torch
@@ -468,6 +482,92 @@ Full write-up, tables and limits: [`docs/simplex_activations.md`](docs/simplex_a
 
 ---
 
+## 8c. Hyperparameter search — full GCN+GRU, verified against the frozen test protocol
+
+**The question.** Every training knob in the baseline (`scripts/16`'s `DEFAULTS`)
+was set by hand, once, on fold 8, before the full sweep existed. Does a
+systematic search over the joint space find a configuration the hand-picked one
+missed?
+
+**The setup** (`scripts/24.tune_hyperparameters.py`). Random search (default; an
+Optuna TPE backend is also wired in and used if `optuna` is installed) over nine
+axes — the full commissioned grid, **27,648 points**:
+
+| Axis | Values | Baseline |
+|---|---|---|
+| `lookback` | 8, 12, 16, 24 | 12 |
+| `gcn_hidden` | 16, 32, 64 | 32 |
+| `gcn_layers` | 1, 2 | 2 |
+| `gru_hidden` | 32, 64, 128 | 32 |
+| `gru_layers` | 1, 2 | 1 |
+| `dropout` | 0, 0.1, 0.2, 0.3 | 0.2 |
+| `learning_rate` | 1e-4, 3e-4, 1e-3, 3e-3 | 3e-3 |
+| `batch_size` | 16, 32, 64 | 64 |
+| `weight_decay` | 0, 1e-5, 1e-4, 1e-3 | 1e-4 |
+
+`gru_hidden` and `gru_layers` are knobs the baseline's `GCNGRU` does not expose
+(it ties the GRU width to the graph-conv width and hardcodes one layer), so the
+script defines `TunableGCNGRU`: the same spatial-then-temporal arrangement, with
+a linear projection inserted only when `gcn_hidden != gru_hidden`. When the
+search lands on matched widths and a single GRU layer it is the baseline
+architecture exactly — a test asserts the parameter counts match. Everything
+else — training loop, early stopping, optimiser, folds, preprocessing, the
+anchored residual target, the masked metric — is imported from `scripts/16`
+unchanged.
+
+**Selection is validation-only.** The objective minimised is mean masked MAE on
+the **validation split** of the seven headline folds, seeds averaged. The test
+split is never read during the search. Only after the configuration was fixed was
+it retrained with 3 seeds on all nine folds and scored on the test split by the
+same metric the baseline uses.
+
+**Run on disk: 50 trials, random search, seed 0, 2 seeds/trial, ~73 min GPU.**
+
+Best configuration selected on validation: `lookback=16`, `gcn_hidden=32`,
+`gcn_layers=1`, `gru_hidden=128`, `gru_layers=2`, `dropout=0.2`,
+`learning_rate=3e-4`, `batch_size=32`, `weight_decay=1e-5` — validation MAE
+**14.75** against the hand-picked config's validation MAE in the same trial set.
+
+| Model | Headline MAE | Headline peak MAE | 2017 MAE | Seed sd |
+|---|---|---|---|---|
+| persistence | **16.42** | **26.61** | **36.08** | — |
+| `gru_only` v1 (README headline best) | 16.68 | 28.06 | 42.97 | — |
+| **tuned `gcn_gru` v1** | 18.23 | 29.22 | 49.54 | 0.42 |
+| baseline `gcn_gru` v1 (script 16 defaults) | 18.98 | 30.36 | 54.81 | — |
+
+**Did tuning improve the models? No — not by a margin this run establishes.**
+
+1. **The like-for-like gain is inside the noise.** Against `gcn_gru` v1 with
+   script 16's defaults, tuning moves the test headline MAE from 18.98 to 18.23,
+   **−0.75 (−4.0%)**. The tuned model's seed sd is 0.42, so −0.75 is under two
+   seed-sd — not a result this run can call real. It moves in the right
+   direction; it does not clear the bar this project uses for every other
+   comparison (§6, §8, §8b all apply the same "read the seed sd first" rule).
+2. **It changes nothing about the standing picture.** The tuned `gcn_gru` still
+   loses to the no-graph control `gru_only` (16.68), still loses to persistence
+   on the headline mean (18.23 vs 16.42) and on peak MAE (29.22 vs 26.61), and
+   fold 1 (2017) is still where the headline gap lives (tuned 2017 MAE 49.54).
+   Tuning a backbone that §6 showed the graph actively hurts does not recover
+   what the graph costs.
+3. **The response surface is flat.** Averaged over all 50 trials, mean
+   validation MAE moves ~0.1–0.2 across the *entire* rest of the grid. The only
+   axes with a visible signal are "not `learning_rate=3e-3`" (15.07 vs ~14.93
+   elsewhere) and "not `dropout=0`" (15.10 vs ~14.90) — and the baseline already
+   sits at `dropout=0.2`. There is no rich optimum being missed; the model's
+   accuracy is close to insensitive to its hyperparameters on this data, which
+   is itself consistent with §7's finding that at horizon 1 the forecast origin
+   carries nearly all the signal.
+
+The search is reproducible from `--search-seed` and `--n-trials` alone (random
+search) and re-runnable at any budget; `--tune-folds`, `--trial-seeds` and
+`--final-seeds` scale it down for a smoke run. Selection touching validation only
+is enforced in code and covered by `tests/test_tuning.py`.
+
+Full write-up, the per-fold table, the top-15 trials and the per-axis response:
+[`docs/hyperparameter_tuning.md`](docs/hyperparameter_tuning.md).
+
+---
+
 ## 9. What the evidence says to do next
 
 Ordered by what §6–8 actually established, not by the original work plan (which
@@ -504,13 +604,14 @@ actually checked this session:
 
 - `docs/model_tensors.md` states "62 tests, all passing" for the stage-3
   tensor/adjacency/fold tests specifically — still true for that subset, but
-  the repository-wide count has grown to 293 collected as more components were
-  added.
+  the repository-wide count has grown to **431 collected, 431 passing** under
+  `torch==2.11.0+cu128` as more components were added (most recently
+  `tests/test_tuning.py`, 14 tests, §8c).
 - `docs/learnable_lags_results.md` states "323 tests pass repository-wide" —
-  that was true when written; it's 293 collected / 347 passed (parametrized)
-  now, after `test_improved_losses.py` (24 tests, §8) was added, one
-  dependency-driven set of failures was resolved by installing `scipy` and
-  `matplotlib`, and the remaining 3 (`test_lag_encoder.py`) stopped failing
+  that was true when written; it's **431 collected / 431 passed** now, after
+  `test_improved_losses.py` (24 tests, §8) and `test_tuning.py` (14 tests, §8c)
+  were added, one dependency-driven set of failures was resolved by installing
+  `scipy` and `matplotlib`, and the 3 `test_lag_encoder.py` failures stopped
   once the CUDA torch install (§4) landed on `2.11.0+cu128` instead of
   `2.14.0+cpu`.
 - `docs/learnable_lags.md` header still reads "Status: not started" — it's a
@@ -543,6 +644,7 @@ were independently re-verified this session by rerunning the scripts twice
 - [`docs/running_from_zero.md`](docs/running_from_zero.md) — full rebuild instructions
 - [`docs/baseline.md`](docs/baseline.md) — baseline architecture and full results
 - [`docs/improvements.md`](docs/improvements.md) — the objective-fix work
+- [`docs/hyperparameter_tuning.md`](docs/hyperparameter_tuning.md) — the 9-axis search and why its best config is not an improvement
 - [`docs/model_tensors.md`](docs/model_tensors.md) — tensors, folds, adjacency
 - [`docs/learnable_lags_results.md`](docs/learnable_lags_results.md) — Component A
 - [`docs/climate_dataset_schema.md`](docs/climate_dataset_schema.md) — ERA5 extraction spec
