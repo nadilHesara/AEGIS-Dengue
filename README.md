@@ -27,6 +27,7 @@ runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 | 8d. Optimiser (Adam vs AdamW) and LR scheduling                       | Done. Neither is established; the useful result is a **mechanism finding** — a plateau scheduler and early stopping on the same metric barely interact — see §8d.                                                  |
 | 8e. Graph representation (identity / contiguity / Gaussian / learned) | Done. **No graph beats the identity control.** The Gaussian graph is worse than contiguity; a graph learned end-to-end is a wash. Closes the dual-graph precondition — see §8e.                                    |
 | 8f. Multi-horizon forecasting (h = 1–4)                               | Done. **The first real improvement in this repository.** At h=3 and h=4 the model beats same-horizon persistence on MAE _and_ peak MAE, 6–7 of 7 folds, p < 0.01, and the gain is not the 2017 artefact — see §8f. |
+| 8g. Layer normalisation before the prediction head                    | Done. **Not established on accuracy** — the headline gain is the 2017 fold and nothing else (±0.31 MAE over the other six). The real result is **24–51% lower seed variance at every horizon** — see §8g.          |
 | 9. Gated fusion, climate ablation at h=4                              | Dual graph **answered negatively** by §8e. The top item is now §8f's follow-up. See §9.                                                                                                                            |
 
 **The one-paragraph summary of where the model stands:** **at one week ahead, no
@@ -848,6 +849,49 @@ Full write-up, per-fold tables and the significance tests:
 
 ---
 
+## 8g. Layer normalisation before the prediction head — an accuracy null and a variance result
+
+`GRU -> LayerNorm(32) -> dropout -> head`, against the identical model without
+the norm. The norm sits on the clean final hidden state, before the dropout the
+baseline already applies, with statistics over the hidden axis per (window,
+district) row. `baseline` is the same class with `normalise=False` and
+reproduces the committed 18.98 exactly, which is the check that the harness is
+neutral. 64 extra parameters, on 8,193.
+
+| h | `baseline` | `layer_norm` | Δ | Folds improved | p | **Δ ex-fold-1** |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 18.98 | 17.41 | −1.57 | 3/7 | 0.35 | **−0.02** |
+| 2 | 23.79 | 21.73 | −2.05 | 4/7 | 0.32 | **−0.16** |
+| 3 | 27.18 | 25.69 | −1.49 | 5/7 | 0.36 | **−0.01** |
+| 4 | 29.93 | 27.65 | −2.29 | 5/7 | 0.29 | **−0.31** |
+
+**The headline movement is the 2017 fold and nothing else.** Fold 1 moves −10.9
+to −14.2 MAE; no other fold moves by as much as 1.5, the sign is not consistent
+fold to fold, and no paired test clears p = 0.05 at any horizon. This is the
+fifth change in this project to produce a headline gain that is entirely the
+epidemic fold (§8, §8b, §8c, §8d).
+
+**What survives is seed stability.** Mean per-fold seed sd falls at every
+horizon — 0.795→0.605 (h=1), 1.294→0.639 (h=2), 1.300→0.824 (h=3), 1.671→1.008
+(h=4): 24–51%, same direction throughout, with the absolute gap widening as the
+horizon grows. In a project whose effect sizes are routinely under 1 MAE, a
+tighter seed spread makes every subsequent comparison cheaper to resolve. That,
+not the headline, is the reason to keep the norm. Convergence speed did not move
+consistently, so the usual "trains faster" claim is not supported here.
+
+The learned gain stays at 0.905–0.931 with a near-zero bias at every horizon, so
+the module did plain normalisation rather than learning to switch itself off —
+the flat headline is "normalising did not help the score", which is a different
+finding and is why the affine parameters are logged.
+
+Consistent with the standing explanation (§6–§8e): normalisation improved
+conditioning measurably and the score still did not move, because the ceiling is
+set by the information in the inputs, not by optimisation.
+
+Full write-up: [`docs/layer_norm.md`](docs/layer_norm.md).
+
+---
+
 ## 9. What the evidence says to do next
 
 Ordered by what §6–8f actually established. Two directions are closed and one has
@@ -910,10 +954,11 @@ actually checked this session:
   §8d; `tests/test_graph_variants.py`, 25 tests, §8e; and
   `tests/test_multi_horizon.py`, 34 tests, §8f).
 - `docs/learnable_lags_results.md` states "323 tests pass repository-wide" —
-  that was true when written; it's **506 collected / 506 passed** now, after
+  that was true when written; it's **527 collected / 527 passed** now, after
   `test_improved_losses.py` (24 tests, §8), `test_tuning.py` (14 tests, §8c),
-  `test_optimisers.py` (16 tests, §8d), `test_graph_variants.py` (25 tests, §8e)
-  and `test_multi_horizon.py` (34 tests, §8f) were added, one dependency-driven set of
+  `test_optimisers.py` (16 tests, §8d), `test_graph_variants.py` (25 tests, §8e),
+  `test_multi_horizon.py` (34 tests, §8f) and `test_layer_norm.py` (21 tests,
+  §8g) were added, one dependency-driven set of
   failures was resolved by installing `scipy` and `matplotlib`, and the 3
   `test_lag_encoder.py` failures stopped once the CUDA torch install (§4) landed
   on `2.11.0+cu128` instead of `2.14.0+cpu`.
@@ -965,6 +1010,7 @@ were independently re-verified this session by rerunning the scripts twice
 - [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md) — Adam vs AdamW and the plateau-scheduler mechanism finding
 - [`docs/graph_representation.md`](docs/graph_representation.md) — four adjacencies against the identity control
 - [`docs/multi_horizon.md`](docs/multi_horizon.md) — h = 1–4, and the first result that beats persistence
+- [`docs/layer_norm.md`](docs/layer_norm.md) — LayerNorm before the head: an accuracy null and a seed-variance result
 - [`docs/model_tensors.md`](docs/model_tensors.md) — tensors, folds, adjacency
 - [`docs/learnable_lags_results.md`](docs/learnable_lags_results.md) — Component A
 - [`docs/climate_dataset_schema.md`](docs/climate_dataset_schema.md) — ERA5 extraction spec

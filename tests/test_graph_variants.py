@@ -53,6 +53,17 @@ graphs.load_modules()
 baseline = graphs.baseline_module
 
 
+# `data/processed/` is gitignored, so the built adjacency is absent on a fresh
+# clone and in CI. The tests that read it assert properties of the *committed
+# matrices* and cannot be checked without them; the rest of this file runs on
+# constructed inputs and is unaffected. Same marker as `test_baseline.py`,
+# `test_folds.py` and `test_model_tensors.py`.
+requires_real_data = pytest.mark.skipif(
+    not graphs.ADJACENCY_PATH.exists(),
+    reason="Run scripts/13.build_adjacency.py first.",
+)
+
+
 # ---------------------------------------------------------------------------
 # The adaptive adjacency
 # ---------------------------------------------------------------------------
@@ -244,6 +255,7 @@ def test_identity_adjacency_makes_the_graph_conv_per_node():
     torch.testing.assert_close(convolved, plain)
 
 
+@requires_real_data
 def test_the_identity_arm_uses_the_identity():
     matrices = graphs.load_adjacencies(25)
 
@@ -256,6 +268,7 @@ def test_the_control_arm_is_identity_not_contiguity():
     assert graphs.CONTROL_ARM == "identity"
 
 
+@requires_real_data
 def test_fixed_arms_load_the_expected_matrices():
     matrices = graphs.load_adjacencies(25)
 
@@ -268,6 +281,7 @@ def test_fixed_arms_load_the_expected_matrices():
         )
 
 
+@requires_real_data
 def test_the_adaptive_arm_gets_a_placeholder_that_is_the_identity():
     """So a bug that used the passed matrix would report the control's number.
 
