@@ -151,8 +151,16 @@ def run(baseline, geometries, folds, adjacencies, arms, config, device):
     model_rows: list[dict] = []
     naive_rows: list[pd.DataFrame] = []
 
+    nodes = pd.read_csv(PROCESSED_DIR / "nodes.csv").sort_values("node_id")
+
     for variant in config["variants"]:
         tensors = baseline.folds_module.load_tensors(variant)
+        # `load_tensors` unpacks the .npz, which carries no district names.
+        # `baseline.naive.evaluate_folds` needs `tensors["canonical_name"]` for
+        # its per-district breakdown; scripts/15.main attaches it the same way
+        # right before its own call. Match that contract rather than touch
+        # evaluate_folds.
+        tensors["canonical_name"] = nodes["canonical_name"].to_numpy(dtype=object)
 
         for lookback, horizon in geometries:
             naive_metrics = naive_for_geometry(
