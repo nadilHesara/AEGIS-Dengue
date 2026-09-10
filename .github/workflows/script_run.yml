@@ -1,37 +1,111 @@
-name: Run All scripts
+name: Run Data Pipeline and Tests
 
 on:
-    push:
-        branches: ["main"]
-    pull_request:
-        branches: ["main"]
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
 
 jobs:
-    run-and-test:
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v3
 
-            - name: Set up python
-              uses: actions/setup-python@v4
-              with:
-                  python-version: 3.12
-            
-            - name: Install dependencies
-              run: |
-                python -m pip install --upgrade pip
-                pip install -r requirements.txt
-                pip install -r requirements-model.txt
+  run-and-test:
 
-            - name: Run Scripts
-              run: |
-                python scripts/data/0.load_dataset.py
-                python scripts/data/1.dataset_validate.py
-                python scripts/data/2.create_calendar.py
-                python scripts/data/3.create_nodes.py
-                python scripts/data/4.create_canonical_dengue.py
+    name: Run Scripts and Tests
 
-            - name: Check tests
-              run: |
-                python -m pytest tests/
+    runs-on: ubuntu-latest
+
+
+    steps:
+
+      # ------------------------------------
+      # 1. Checkout Repository
+      # ------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ------------------------------------
+      # 2. Setup Python Environment
+      # ------------------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+
+      # ------------------------------------
+      # 3. Display Environment Information
+      # ------------------------------------
+      - name: Check Python Version
+        run: |
+          python --version
+          pip --version
+
+
+      # ------------------------------------
+      # 4. Install Dependencies
+      # ------------------------------------
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-model.txt
+
+
+      # ------------------------------------
+      # 5. Create Required Directories
+      # ------------------------------------
+      - name: Prepare project directories
+        run: |
+          mkdir -p data/raw
+          mkdir -p data/processed
+          mkdir -p results
+          mkdir -p models
+
+
+      # ------------------------------------
+      # 6. Run Data Processing Pipeline
+      # ------------------------------------
+      - name: Run Data Pipeline
+        run: |
+
+          echo "Loading dataset..."
+          python scripts/data/0.load_dataset.py
+
+          echo "Validating dataset..."
+          python scripts/data/1.dataset_validate.py
+
+          echo "Creating calendar features..."
+          python scripts/data/2.create_calendar.py
+
+          echo "Creating spatial nodes..."
+          python scripts/data/3.create_nodes.py
+
+          echo "Creating canonical dengue dataset..."
+          python scripts/data/4.create_canonical_dengue.py
+
+
+      # ------------------------------------
+      # 7. Run Automated Tests
+      # ------------------------------------
+      - name: Run Tests
+        run: |
+          pytest tests/ -v
+
+
+      # ------------------------------------
+      # 8. Upload Results (Optional)
+      # ------------------------------------
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-results
+          path: |
+            results/
+            data/processed/
