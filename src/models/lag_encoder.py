@@ -38,6 +38,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from .simplex_activations import SimplexActivation
+
 
 # Bump centres in reporting periods, spread across the reach.
 #
@@ -80,6 +82,8 @@ class LearnableLagEncoder(nn.Module):
         embedding_dim: int = 8,
         init_centres: tuple[float, ...] = DEFAULT_CENTRES,
         init_width: float = 3.0,
+        activation: str = "softmax",
+        **activation_kwargs,
     ):
         super().__init__()
 
@@ -91,6 +95,11 @@ class LearnableLagEncoder(nn.Module):
         self.lag_reach = lag_reach
         self.n_nodes = n_nodes
         self.n_features = n_features
+
+        # How the basis logits are put onto the simplex. Softmax is the
+        # default so that an unchanged call site trains the unchanged model;
+        # see simplex_activations.py for why it is worth varying.
+        self.activation = SimplexActivation(activation, **activation_kwargs)
 
         self.centre_raw = nn.Parameter(torch.tensor(init_centres, dtype=torch.float32))
         self.width_raw = nn.Parameter(
@@ -132,7 +141,7 @@ class LearnableLagEncoder(nn.Module):
             "nd,kdb->nkb", self.node_embedding, self.feature_projection
         )
 
-        return torch.softmax(logits, dim=-1)
+        return self.activation(logits, dim=-1)
 
     def kernels(self) -> torch.Tensor:
         """Return the delay curves. [nodes, features, lag_reach], rows sum to one."""
