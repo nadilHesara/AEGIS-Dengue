@@ -6,8 +6,8 @@ case history, a graph-convolution + GRU model over a district contiguity graph.
 
 This file is the single entry point. Section-specific detail lives in
 `docs/`; this README states what is true right now, verified against the code
-and the committed results as of **2026-09-10** (§8c and its supporting run
-added this date; §6/§8 GPU numbers re-verified 2026-09-09).
+and the committed results as of **2026-09-10** (§8c and §8d and their
+supporting runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 
 ---
 
@@ -24,6 +24,7 @@ added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 | 7. Objective/loss improvements | Done. Fixes the epidemic-fold failure specifically, not the model generally — see §8. |
 | 8. Simplex activations for the lag encoder | Done. A mechanism result, not an accuracy one — see §8b. |
 | 8c. Hyperparameter search (full GCN+GRU, 9 axes) | Done. Random search, validation-fold selection. **Not a real improvement** — the winning config's test gain is inside seed noise — see §8c. |
+| 8d. Optimiser (Adam vs AdamW) and LR scheduling | Done. Neither is established; the useful result is a **mechanism finding** — a plateau scheduler and early stopping on the same metric barely interact — see §8d. |
 | 9. Dual graph, gated fusion, multi-horizon | Not started. See §9 for what the evidence says to do next. |
 
 **The one-paragraph summary of where the model stands:** no configuration in
@@ -31,13 +32,14 @@ this repository beats persistence on the headline mean by a margin that isn't
 also achievable by a tie. The queen-contiguity graph is not neutral — it
 measurably hurts, on every fold. The entire headline gap between the baseline
 and persistence lives in a single fold, the 2017 epidemic; the reweighted
-objective closes most of that gap without touching the other eight folds. A
-9-axis hyperparameter search over the full GCN+GRU (§8c) does not change this
-picture: its validation-selected best config improves the like-for-like baseline
-by 4% on the test headline, which is inside the seed noise, and still loses to
-both the no-graph control and persistence. None of this is a setback dressed up —
-it's what nine years of data and three seeds actually show, and it points at a
-specific next step (§9) rather than a vague one.
+objective closes most of that gap without touching the other eight folds.
+Neither of the two training-procedure sweeps changes this picture: a 9-axis
+hyperparameter search (§8c) and an optimiser/schedule comparison (§8d) both
+produce headline movements that are inside the seed noise and both concentrated
+almost entirely in fold 1. Four separate changes have now had that same
+single-fold shape, which makes it a prior rather than a coincidence. None of this
+is a setback dressed up — it's what nine years of data and three seeds actually
+show, and it points at a specific next step (§9) rather than a vague one.
 
 ---
 
@@ -46,6 +48,7 @@ specific next step (§9) rather than a vague one.
 ```
 scripts/            numbered pipeline, run in order — see §5
                      24.tune_hyperparameters.py — the 9-axis GCN+GRU search (§8c)
+                     25.train_optimisers.py — Adam / AdamW / LR schedule (§8d)
 src/models/          lag_encoder.py — the learnable-lag module (Component A)
                      simplex_activations.py — alternative simplex maps for its
                      basis mixture (§8b)
@@ -53,7 +56,7 @@ data/raw/             source CSVs (dengue, ERA5, CHIRPS, GADM polygons)
 data/interim/         calendar, canonical dengue, climate joined to periods
 data/processed/       panel, tensors, adjacency, folds — model-ready arrays
 results/              every generated report, metrics CSV and figure
-tests/                431 cases collected, all passing under torch 2.11.0+cu128
+tests/                447 cases collected, all passing under torch 2.11.0+cu128
 docs/                 design documents — one topic each, cross-referenced below
 ```
 
@@ -79,6 +82,7 @@ Read this README first. Go to a doc only for the depth on that topic.
 | [`docs/reporting_calendar.md`](docs/reporting_calendar.md) | Why `period_id`, not source year/week, is the only safe sort key | Yes — specification |
 | [`docs/simplex_activations.md`](docs/simplex_activations.md) | Replacing the lag encoder's softmax: five alternative simplex maps, the sparse-collapse failure mode, full sweep and limits | Yes — written this session against the run on disk |
 | [`docs/hyperparameter_tuning.md`](docs/hyperparameter_tuning.md) | The 9-axis search over the full GCN+GRU: search space, random-vs-Optuna, validation-only selection, the flat response surface, why the "best" config is not an improvement | Yes — written this session against the 50-trial run on disk |
+| [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md) | Adam vs AdamW vs AdamW+ReduceLROnPlateau: the hooks added to script 16, the three-arm sweep, and why the schedule fires after the kept model is already chosen | Yes — written this session against the 9-fold × 3-seed run on disk |
 | [`docs/proposal_brief.md`](docs/proposal_brief.md) | Source material for a course proposal document, dated 2026-08-04 | **Superseded.** Written before the full sweep; states fold-8-only numbers as "preliminary" and explicitly forbids citing a 9-fold result. That result now exists — see §6. Keep for the proposal-writing instructions, not for the numbers. |
 
 ---
@@ -168,11 +172,12 @@ $py = ".venv\Scripts\python.exe"
 & $py scripts\17.lag_correlation_scan.py
 & $py scripts\20.train_improved.py --seeds 3
 & $py scripts\24.tune_hyperparameters.py --n-trials 50
+& $py scripts\25.train_optimisers.py --seeds 3
 ```
 
 About 90 minutes for the pipeline through script 20, almost all of it in the two
 training sweeps; script 24's search adds roughly another 75 minutes for 50
-trials on GPU. Add
+trials on GPU, and script 25's three-arm sweep about 2 minutes. Add
 `18.train_lag_gcn_gru.py --seeds 1 --no-control` then `19.lag_demo.py` for the
 learnable-lag component (Component A).
 
@@ -183,6 +188,7 @@ For a smoke test rather than a full sweep, both training scripts accept
 & $py scripts\16.train_gcn_gru.py --variants v1 --folds 8 --seeds 1
 & $py scripts\20.train_improved.py --folds 8 --seeds 1
 & $py scripts\24.tune_hyperparameters.py --tune-folds 8 --n-trials 5 --trial-seeds 1 --final-seeds 1
+& $py scripts\25.train_optimisers.py --folds 8 --seeds 1
 ```
 
 Roughly a minute each.
@@ -193,9 +199,9 @@ Roughly a minute each.
 .venv\Scripts\python.exe -m pytest tests\ -q
 ```
 
-**431 tests collected, 431 pass** (some parametrize into multiple cases; count
-grew from 293 as `test_improved_losses.py`, `test_tuning.py` and others were
-added) — verified under `torch==2.11.0+cu128`, with `pyarrow`, `scipy` and
+**447 tests collected, 447 pass** (some parametrize into multiple cases; count
+grew from 293 as `test_improved_losses.py`, `test_tuning.py`,
+`test_optimisers.py` and others were added) — verified under `torch==2.11.0+cu128`, with `pyarrow`, `scipy` and
 `matplotlib` also installed. An earlier state this session was **344 passed, 3
 failed** under `torch==2.14.0+cpu`
 earlier this session: `test_lag_encoder.py::test_recovers_planted_delays` on
@@ -568,10 +574,85 @@ Full write-up, the per-fold table, the top-15 trials and the per-axis response:
 
 ---
 
+## 8d. Optimiser and learning-rate schedule — done, one accuracy null and one mechanism result
+
+**The two questions.** (1) Adam adds `wd * w` to the gradient, where Adam's own
+per-parameter normalisation then rescales it — so the decay a parameter actually
+receives is `wd` divided by a running estimate of its gradient magnitude, and
+parameters with small gradients get decayed far harder than those with large
+ones. AdamW applies the decay directly to the weight instead. At the baseline's
+`weight_decay=1e-4` that is a real difference in what the regulariser does.
+(2) A fixed learning rate is either too small for the start of training or too
+large for the end; `ReduceLROnPlateau` removes the choice. §8c gave a specific
+reason to expect this to matter — `learning_rate` is one of only two axes with
+measurable signal in the whole 9-axis grid, and the baseline's `3e-3` is the
+*worst* of the four values tried.
+
+**The setup** (`scripts/25.train_optimisers.py`). Three arms — `adam` (control),
+`adamw`, `adamw_scheduled` — changing only the optimiser and the schedule.
+Script 16 previously hardcoded `torch.optim.Adam` inside `train_one` with no hook
+for it, so rather than copy the loop it gained two backward-compatible hooks,
+`make_optimiser` and `make_scheduler`, both defaulting to the baseline's
+behaviour. The `adam` arm passes Adam back through the hook and **reproduces
+script 16's committed fold-1 MAE of 54.81 exactly** — bit-identical predictions,
+asserted by test on both synthetic and real fold data.
+
+Early stopping keeps the baseline's patience of 15; the scheduler gets 5, so it
+can fire ~3 times before early stopping can trigger. The scheduler is stepped
+*after* early stopping has seen the epoch, so it cannot change which epoch is
+selected as best — only what the optimiser does next.
+
+**Run: 9 folds × 3 seeds × 3 arms, 1.9 min GPU.**
+
+| Arm | Headline MAE | vs `adam` | Peak MAE | 2017 MAE | Mean best epoch | Seed sd |
+|---|---|---|---|---|---|---|
+| `adamw` | **18.67** | −0.31 | 29.89 | 52.81 | 20.0 | 0.97 |
+| `adamw_scheduled` | 18.90 | −0.08 | 30.26 | 53.98 | 19.1 | 0.73 |
+| `adam` (control) | 18.98 | — | 30.36 | 54.81 | 20.6 | 0.68 |
+
+**Neither change is established.** AdamW's −0.31 MAE is **0.38 pooled seed-sd**,
+a paired t over the seven headline folds gives **t = −1.11, p = 0.31**, it wins
+on only **4 of 7 folds**, and **91% of the gain is fold 1** — the other six folds
+move −0.03 MAE, i.e. nothing. `adamw_scheduled` is weaker still (−0.08, t =
+−0.58, p = 0.58) and its fold-1 share is **147%**, meaning the non-epidemic folds
+moved the *wrong* way. This is the fourth time a headline movement in this repo
+has turned out to be the 2017 epidemic fold and nothing else (§8, §8b, §8c); at
+this point that is a prior, not a surprise.
+
+**The mechanism finding, which is the result worth carrying forward.** The
+learning-rate traces (`optimiser_lr_traces.csv`, all 27 scheduled runs) show
+that **in 23 of 27 runs the rate did not drop until *after* the best epoch had
+already been saved.** The reason is mechanical: `ReduceLROnPlateau` fires after 5
+epochs without improvement, and early stopping keeps the best model from *before*
+that plateau began — so the first reduction necessarily lands inside the
+early-stopping wait, when the kept model is already fixed. On fast-converging
+folds it is absolute: fold 2 reaches its best epoch at 2–3 while the first drop
+lands at 9–10, and the arms' MAEs are identical to three decimals.
+
+**So a plateau scheduler and early-stopping-on-the-same-metric are close to
+mutually exclusive as configured.** Giving a schedule a real chance requires
+either a much longer early-stopping patience (which changes the baseline protocol
+and breaks comparability with every committed number) or a schedule that does not
+wait for a plateau — cosine annealing or a fixed step decay, which reduce the
+rate *during* productive training. The second is the cleaner next test and the
+`make_scheduler` hook takes it with no further changes to script 16.
+
+Two secondary observations: AdamW does **not** converge faster (20.0 epochs vs
+20.6, the same within noise), and it is **noisier** (seed sd 0.97 vs 0.68) —
+part of why its mean advantage fails the sd test.
+
+Full write-up, per-fold tables, the LR-trace analysis and the significance
+tests: [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md).
+
+---
+
 ## 9. What the evidence says to do next
 
-Ordered by what §6–8 actually established, not by the original work plan (which
-predates the full sweep and assumed the graph was neutral):
+Ordered by what §6–8d actually established, not by the original work plan (which
+predates the full sweep and assumed the graph was neutral). Note that §8c and
+§8d between them have now largely closed off the *training-procedure* direction:
+the hyperparameter response surface is flat and neither optimiser nor schedule
+moves the headline out of the noise. What is left is structural.
 
 1. **Test whether *any* graph beats the identity, before building on top of
    contiguity.** §6 answered the dual-graph work plan's own stated
@@ -594,6 +675,15 @@ predates the full sweep and assumed the graph was neutral):
 5. **Quantile forecasts** at τ ∈ {0.1, 0.5, 0.9} for operational use — the
    pinball loss from §8 already exists; extending it to a real interval is a
    small step.
+6. **A non-plateau learning-rate schedule** (cosine annealing or a fixed step
+   decay), if the schedule question is worth revisiting at all. §8d showed
+   `ReduceLROnPlateau` and early-stopping-on-the-same-metric barely interact —
+   in 23 of 27 runs the rate never dropped until after the kept model was
+   already chosen — so a schedule that reduces the rate *during* productive
+   training is the only version of this idea that has a mechanism to work
+   through. `scripts/25`'s `make_scheduler` hook takes one with no further
+   change to script 16. Low priority: §8d's accuracy result gives no reason to
+   expect much.
 
 ---
 
@@ -604,16 +694,26 @@ actually checked this session:
 
 - `docs/model_tensors.md` states "62 tests, all passing" for the stage-3
   tensor/adjacency/fold tests specifically — still true for that subset, but
-  the repository-wide count has grown to **431 collected, 431 passing** under
+  the repository-wide count has grown to **447 collected, 447 passing** under
   `torch==2.11.0+cu128` as more components were added (most recently
-  `tests/test_tuning.py`, 14 tests, §8c).
+  `tests/test_tuning.py`, 14 tests, §8c, and `tests/test_optimisers.py`, 16
+  tests, §8d).
 - `docs/learnable_lags_results.md` states "323 tests pass repository-wide" —
-  that was true when written; it's **431 collected / 431 passed** now, after
-  `test_improved_losses.py` (24 tests, §8) and `test_tuning.py` (14 tests, §8c)
-  were added, one dependency-driven set of failures was resolved by installing
-  `scipy` and `matplotlib`, and the 3 `test_lag_encoder.py` failures stopped
-  once the CUDA torch install (§4) landed on `2.11.0+cu128` instead of
-  `2.14.0+cpu`.
+  that was true when written; it's **447 collected / 447 passed** now, after
+  `test_improved_losses.py` (24 tests, §8), `test_tuning.py` (14 tests, §8c) and
+  `test_optimisers.py` (16 tests, §8d) were added, one dependency-driven set of
+  failures was resolved by installing `scipy` and `matplotlib`, and the 3
+  `test_lag_encoder.py` failures stopped once the CUDA torch install (§4) landed
+  on `2.11.0+cu128` instead of `2.14.0+cpu`.
+- **`scripts/16.train_gcn_gru.py` was modified for §8d.** `train_one` gained two
+  optional hooks, `make_optimiser` and `make_scheduler`, and the hardcoded
+  `torch.optim.Adam` moved into a `build_optimiser` function that is still the
+  default. `train_one`'s return dict gained `learning_rates` and `final_lr`.
+  **Behaviour is unchanged when neither hook is passed** — the `adam` control arm
+  reproduces script 16's committed fold-1 MAE of 54.81 with bit-identical
+  predictions, asserted by test on both synthetic and real fold data, and the
+  full baseline sweep is unaffected. Any doc quoting script 16's optimiser as
+  "hardcoded Adam" is describing the pre-§8d state.
 - `docs/learnable_lags.md` header still reads "Status: not started" — it's a
   workplan document frozen at the point work began; `learnable_lags_results.md`
   is the outcome doc and is current.
