@@ -30,6 +30,14 @@ Four diagnostics on the per-district-period test residuals e = y_hat - y:
          - the district's rank within the current national outbreak wave
        A driver that correlates is a green light to engineer it as a feature.
 
+       Also in part C: each district's own residual against the same-period
+       mean residual of its geographic neighbours (queen contiguity,
+       `adjacency.npz`'s `A_binary`). This is the spatial-structure check the
+       decision table names directly. Reported regardless of magnitude -- a
+       null here is informative given the centroid_lon/lat correlations part B
+       already finds, which could otherwise look like leftover spatial signal
+       that is really just latitude/longitude, not neighbour spillover.
+
     D  variance decomposition: between-district vs within-district-over-time;
        the share explained by day-of-year; the share concentrated in outbreak
        periods vs endemic ones.
@@ -81,6 +89,13 @@ DRIVER_COLUMNS = (
     "periods_since_outbreak",
     "trailing_52_cumulative_cases",
     "national_wave_rank",
+)
+
+# Neighbour-residual columns, correlated against a district's OWN residual
+# (not the driver proxies' target -- see part C's second correlate_block call).
+NEIGHBOUR_COLUMNS = (
+    "neighbour_mean_residual",
+    "neighbour_mean_abs_residual",
 )
 
 
@@ -319,6 +334,59 @@ def driver_proxies(folds: list[dict]) -> pd.DataFrame:
                 )
 
     return pd.DataFrame(frames)
+
+
+def neighbour_residual_panel(residuals: pd.DataFrame) -> pd.DataFrame:
+    """Each district's own residual next to its neighbours' same-period mean.
+
+    "Neighbour" is queen contiguity, `adjacency.npz`'s `A_binary` -- a fixed
+    0/1 matrix, no self-loops. For each (horizon, target_period_id, node), the
+    neighbour value is the mean residual (and mean |residual|) of that node's
+    contiguous districts at the same target period. A district with no
+    neighbours (there is none in this graph, but the guard costs nothing) or
+    whose neighbours are unobserved that period is dropped for that cell.
+
+    This is independent of part B's centroid_lat/lon correlation: a district's
+    latitude is a property of the district, constant across time, while this
+    panel asks whether districts that are *adjacent* err together on the *same*
+    week -- true spillover, not a location effect that centroid coordinates
+    would already have captured.
+    """
+
+    with np.load(PROCESSED_DIR / "adjacency.npz", allow_pickle=True) as data:
+        contiguity = data["A_binary"].astype(bool)
+
+    n_nodes = contiguity.shape[0]
+    neighbours_of = [np.flatnonzero(contiguity[i]) for i in range(n_nodes)]
+
+    records = []
+    for (horizon, target_period), group in residuals.groupby(
+        ["horizon", "target_period_id"]
+    ):
+        by_node = group.set_index("node_id")
+        for node in range(n_nodes):
+            own = neighbours_of[node]
+            if len(own) == 0 or node not in by_node.index:
+                continue
+            present = [n for n in own if n in by_node.index]
+            if not present:
+                continue
+            neighbour_residual = float(by_node.loc[present, "residual"].mean())
+            neighbour_abs_residual = float(
+                by_node.loc[present, "abs_residual"].mean()
+            )
+            records.append(
+                {
+                    "horizon": horizon,
+                    "target_period_id": target_period,
+                    "node_id": node,
+                    "n_neighbours_observed": len(present),
+                    "neighbour_mean_residual": neighbour_residual,
+                    "neighbour_mean_abs_residual": neighbour_abs_residual,
+                }
+            )
+
+    return pd.DataFrame(records)
 
 
 # ---------------------------------------------------------------------------
@@ -586,6 +654,16 @@ def write_report(diagnostics: pd.DataFrame, config: dict) -> None:
             "Computed from case history only. `periods_since_outbreak` uses a "
             "per-fold 90th-pct threshold.",
         ),
+        (
+            "C_residual_vs_neighbour",
+            "C (spatial). Residual vs geographic neighbours' same-period residual",
+            "Own residual/|residual| against the mean residual/|residual| of that "
+            "district's queen-contiguity neighbours (`adjacency.npz` `A_binary`), "
+            "same target period. Reported regardless of magnitude: a null result "
+            "is informative given the centroid_lon/lat correlations in part B --"
+            " those are a fixed location effect, this is same-week spillover "
+            "between adjacent districts, and the two need not agree.",
+        ),
     ]:
         lines += ["", f"## {title}", "", note, ""]
         lines += [
@@ -626,7 +704,7 @@ def write_report(diagnostics: pd.DataFrame, config: dict) -> None:
         "| Residuals ~ white, correlate with nothing | Ceiling is the data. Stop feature engineering; move to likelihood/calibration. |",
         "| Residuals correlate with a channel already in the tensor | Architecture/loss lead, not a feature lead. |",
         "| Residuals correlate with an outbreak-history / susceptibility proxy | Green light to engineer that feature. |",
-        "| Residual has spatial structure (neighbour errors correlate) | The graph question is not as closed as 8e says; revisit at h=4. |",
+        "| Residual has spatial structure (neighbour errors correlate) | The graph question is not as closed as 8e says; revisit at h=4. See part C (spatial) above. |",
         "",
         "## Output files",
         "",
@@ -701,6 +779,22 @@ def main() -> int:
     )
     part_c = correlate_block(merged_c, list(DRIVER_COLUMNS), "C_residual_vs_driver")
 
+    # Part C, spatial: a district's own residual vs its geographic neighbours'
+    # same-period mean residual (queen contiguity). Reported regardless of
+    # magnitude -- this is the direct test of the "neighbour errors correlate"
+    # row in the decision table, and a null here is informative given part B's
+    # centroid_lon/lat correlations: those are a location effect, this is
+    # same-week spillover, and they need not agree.
+    print("Part C: residual vs geographic-neighbour residual")
+    neighbour_panel = neighbour_residual_panel(residuals)
+    merged_neighbour = residuals.merge(
+        neighbour_panel, on=["horizon", "target_period_id", "node_id"], how="inner"
+    )
+    part_c_spatial = correlate_block(
+        merged_neighbour, list(NEIGHBOUR_COLUMNS), "C_residual_vs_neighbour"
+    )
+    part_c = pd.concat([part_c, part_c_spatial], ignore_index=True)
+
     print("Part A: residual autocorrelation")
     part_a_block = part_a(residuals)
 
@@ -728,13 +822,21 @@ def main() -> int:
         print(f"  h={row.horizon} {row.quantity:<10} {row.value:+.3f}  p={row.p_value:.3f}{flag}")
 
     print("\n--- Part C: residual vs driver proxies (top by |r|) ---")
-    cc = part_c.copy()
+    cc = part_c[part_c["part"] == "C_residual_vs_driver"].copy()
     cc["abs_r"] = cc["pearson_r"].abs()
     for row in cc.sort_values("abs_r", ascending=False).head(12).itertuples():
         flag = " *" if np.isfinite(row.p_value) and row.p_value < 0.05 else ""
         print(
             f"  h={row.horizon} {row.quantity:<28} vs {row.target:<12} "
             f"r={row.pearson_r:+.3f}  p={row.p_value:.3f}{flag}"
+        )
+
+    print("\n--- Part C (spatial): residual vs geographic-neighbour residual (all rows) ---")
+    for row in part_c[part_c["part"] == "C_residual_vs_neighbour"].itertuples():
+        flag = " *" if np.isfinite(row.p_value) and row.p_value < 0.05 else ""
+        print(
+            f"  h={row.horizon} {row.quantity:<28} vs {row.target:<12} "
+            f"r={row.pearson_r:+.3f}  p={row.p_value:.3f}  n={row.n}{flag}"
         )
 
     print("\n--- Part B: strongest residual-vs-feature correlations ---")
