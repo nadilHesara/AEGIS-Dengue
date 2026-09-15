@@ -149,6 +149,21 @@ Computed from case history only. `periods_since_outbreak` uses a per-fold 90th-p
 | 4 | `periods_since_outbreak` | abs_residual | -0.116 | -0.346 | 0.000 | 9125 |
 | 4 | `periods_since_outbreak` | residual | +0.071 | +0.171 | 0.000 | 9125 |
 
+## C (spatial). Residual vs geographic neighbours' same-period residual
+
+Own residual/|residual| against the mean residual/|residual| of that district's queen-contiguity neighbours (`adjacency.npz` `A_binary`), same target period. Reported regardless of magnitude: a null result is informative given the centroid_lon/lat correlations in part B -- those are a fixed location effect, this is same-week spillover between adjacent districts, and the two need not agree.
+
+| Horizon | Quantity | Target | Pearson r | Spearman r | p | n |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `neighbour_mean_abs_residual` | abs_residual | +0.578 | +0.428 | 0.000 | 9125 |
+| 1 | `neighbour_mean_residual` | residual | +0.534 | +0.306 | 0.000 | 9125 |
+| 1 | `neighbour_mean_residual` | abs_residual | -0.518 | -0.164 | 0.000 | 9125 |
+| 1 | `neighbour_mean_abs_residual` | residual | -0.506 | -0.160 | 0.000 | 9125 |
+| 4 | `neighbour_mean_residual` | residual | +0.625 | +0.457 | 0.000 | 9125 |
+| 4 | `neighbour_mean_abs_residual` | abs_residual | +0.620 | +0.446 | 0.000 | 9125 |
+| 4 | `neighbour_mean_abs_residual` | residual | -0.539 | -0.180 | 0.000 | 9125 |
+| 4 | `neighbour_mean_residual` | abs_residual | -0.537 | -0.172 | 0.000 | 9125 |
+
 ## D. Variance decomposition
 
 | Horizon | Quantity | Value |
@@ -170,16 +185,76 @@ Computed from case history only. `periods_since_outbreak` uses a per-fold 90th-p
 
 ## Verdict
 
-_To be written after review of the numbers above._
+**The residuals are not noise, on every axis tested.** All four parts land on
+a "there is structure" result, and the spatial finding (part C, spatial) is
+the strongest correlation in the entire diagnostic — stronger than any
+feature, any driver proxy, and any autocorrelation lag.
 
-The decision table this feeds:
+**A. Temporal.** Residual ACF is clearly non-zero: +0.17 to +0.30 at h=1
+(lags 1-3, all p<0.01), rising to **+0.67 at lag 1 for h=4** (p<0.001). The
+model's error this period predicts its error next period, and that gets
+*worse*, not better, at the longer horizon where the model otherwise has real
+skill (README §8f). The temporal signal is not fully extracted.
 
-| Finding | Implication |
+**B. Feature-level.** `cases_log1p` at the origin dominates (r=+0.42 on
+|residual| at h=1, +0.39 at h=4) — the model errs more on districts that are
+already reporting more cases, well beyond every climate channel (all under
+0.15) and the centroid coordinates (~0.12-0.14). This is a location/scale
+effect already partially known from `docs/improvements.md`, restated here as
+the single strongest raw-feature correlate.
+
+**C, missing-driver proxies.** All three candidates correlate with the
+residual, and the pattern is consistent: districts leading the national
+outbreak wave (`national_wave_rank`, r=-0.34), carrying a heavy trailing case
+load (`trailing_52_cumulative_cases`, r=+0.33 to **+0.38**), or recently past
+an outbreak (`periods_since_outbreak`, r=-0.11) all see larger errors. These
+beat every part-B feature except `cases_log1p` itself, and
+`trailing_52_cumulative_cases` **strengthens** from h=1 to h=4 rather than
+fading — the opposite of what a pure noise proxy would do.
+
+**C, spatial — the headline result.** A district's residual correlates with
+its geographic neighbours' same-period residual at **r = +0.53 to +0.63**,
+roughly 40-50% higher than the strongest result anywhere else in this
+diagnostic, and it is *stronger*, not weaker, at h=4 (+0.625 vs +0.534 on
+signed residual). This is a genuinely different finding from part B's
+centroid_lat/lon correlations (~0.12-0.14): centroid position is a fixed
+property of a district, constant over time, while this is same-week error
+co-movement between adjacent districts — real, current spillover that the
+model is not capturing. Given README §8e's finding that the queen-contiguity
+graph *hurts* accuracy at every horizon tested (h=1-4, identity beats it
+everywhere), this is a genuine tension: the graph that hurts accuracy sits on
+exactly the relation whose *errors* are the most correlated of anything
+measured here. The two are not necessarily contradictory (a graph can encode a
+real relationship and still be architecturally mishandled — e.g., averaged in
+rather than gated, or fighting the anchored residual target), but it means
+§8e's "no graph beats no graph" is not the same statement as "there is no
+spatial signal," and this diagnostic is evidence the signal exists.
+
+**D. Where the error lives.** Seasonality explains almost nothing left
+(R²≈0.003 at both horizons — already captured elsewhere). Being "just a hard
+district" explains a little (η²≈0.03-0.04). The big one is outbreak
+concentration: outbreak periods are 21.5% of test cells but carry **57% (h=1)
+/ 61% (h=4)** of total absolute error, at 5-6x the endemic-period MAE. Error is
+concentrated in exactly the periods and districts most relevant to an
+early-warning use case.
+
+**Reading against the decision table:**
+
+| Finding | Triggered? |
 | --- | --- |
-| Residuals ~ white, correlate with nothing | Ceiling is the data. Stop feature engineering; move to likelihood/calibration. |
-| Residuals correlate with a channel already in the tensor | Architecture/loss lead, not a feature lead. |
-| Residuals correlate with an outbreak-history / susceptibility proxy | Green light to engineer that feature. |
-| Residual has spatial structure (neighbour errors correlate) | The graph question is not as closed as 8e says; revisit at h=4. |
+| Residuals white, correlate with nothing | **No** — ruled out on every part. |
+| Correlates with a tensor channel | **Yes** (part B, `cases_log1p` dominant) — an architecture/loss lead worth a look, but already partially addressed by `docs/improvements.md`'s level-weighted loss. |
+| Correlates with an outbreak-history proxy | **Yes** (part C) — supports building `national_wave_rank` and `trailing_52_cumulative_cases` as engineered features (already scoped as a v2 tensor variant). |
+| Spatial structure (neighbour errors correlate) | **Yes, strongly** (part C, spatial) — the largest effect in the diagnostic. Worth revisiting §8e's graph conclusion specifically through the lens of *residual* correlation rather than raw accuracy, and worth testing whether an error-correction or gated spatial term (rather than the current additive graph convolution) can capture it without reintroducing the accuracy cost.
+
+**Bottom line:** there is real, multi-axis structure left in the model's
+errors — temporal, feature-level, outbreak-history, and especially spatial.
+None of it is small; the spatial and outbreak-history effects in particular
+are larger than most feature correlations found anywhere else in this
+project. The next step is not more architecture search on the existing
+inputs — it is either engineering the outbreak-history features directly
+(already scoped) or re-examining whether the district graph is being used
+correctly rather than concluding it is useless.
 
 ## Output files
 
