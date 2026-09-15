@@ -32,7 +32,7 @@ def _load(name):
     return module
 
 
-compare = _load("8.compare_era5_chirps.py")
+compare = _load("data/8.compare_era5_chirps.py")
 
 
 DISTRICTS = compare.FOCUS_DISTRICTS
@@ -464,7 +464,7 @@ def test_chirps_units_are_not_converted():
     would otherwise pass silently and inflate rainfall a thousandfold.
     """
 
-    source = (PROJECT_DIR / "scripts" / "7.extract_chirps_daily.py").read_text(
+    source = (PROJECT_DIR / "scripts" / "data" / "7.extract_chirps_daily.py").read_text(
         encoding="utf-8"
     )
 
@@ -475,7 +475,7 @@ def test_chirps_units_are_not_converted():
 def test_chirps_unit_check_detects_metres():
     """Values in metres are caught by the unit check."""
 
-    chirps = _load("7.extract_chirps_daily.py")
+    chirps = _load("data/7.extract_chirps_daily.py")
 
     frame = pd.DataFrame({"rainfall_mm_chirps": [0.003, 0.005, 0.001]})
 
@@ -487,7 +487,7 @@ def test_chirps_unit_check_detects_metres():
 def test_chirps_unit_check_accepts_millimetres():
     """Ordinary millimetre values raise nothing."""
 
-    chirps = _load("7.extract_chirps_daily.py")
+    chirps = _load("data/7.extract_chirps_daily.py")
 
     frame = pd.DataFrame({"rainfall_mm_chirps": [0.0, 3.5, 42.0, 120.0]})
 
@@ -497,7 +497,7 @@ def test_chirps_unit_check_accepts_millimetres():
 def test_chirps_unit_check_detects_negative_rainfall():
     """Negative rainfall is impossible and is reported."""
 
-    chirps = _load("7.extract_chirps_daily.py")
+    chirps = _load("data/7.extract_chirps_daily.py")
 
     frame = pd.DataFrame({"rainfall_mm_chirps": [1.0, -2.0, 3.0]})
 
@@ -514,7 +514,7 @@ def test_chirps_reuses_the_era5_districts_and_scale():
     artefact of the extraction rather than a property of the rainfall.
     """
 
-    chirps = _load("7.extract_chirps_daily.py")
+    chirps = _load("data/7.extract_chirps_daily.py")
 
     assert chirps.EXPECTED_DISTRICTS == chirps.era5.EXPECTED_DISTRICTS
     assert chirps.AGGREGATION_SCALE_M == chirps.era5.AGGREGATION_SCALE_M
@@ -526,7 +526,7 @@ def test_chirps_reuses_the_era5_districts_and_scale():
 def test_chirps_missing_rainfall_is_never_zero():
     """An unobserved value stays null and is flagged, never filled."""
 
-    chirps = _load("7.extract_chirps_daily.py")
+    chirps = _load("data/7.extract_chirps_daily.py")
 
     frame = pd.DataFrame(
         {

@@ -18,7 +18,7 @@ jupyter_core==5.9.1
 matplotlib==3.11.1
 matplotlib-inline==0.2.2
 nest-asyncio2==1.7.2
-numpy==2.5.1
+numpy==2.4.6
 packaging==26.2
 pandas==3.0.3
 parso==0.8.7
@@ -35,7 +35,7 @@ pytest==9.1.1
 python-dateutil==2.9.0.post0
 pyzmq==27.1.0
 requests==2.34.2
-scipy==1.18.0
+scipy==1.17.0
 shapely==2.1.2
 six==1.17.0
 stack-data==0.6.3
@@ -55,5 +55,8 @@ earthengine-api==1.7.36
 cdsapi==0.7.7
 xarray==2026.7.0
 netCDF4==1.7.4
-rioxarray==0.22.0
-rasterio==1.5.0
+rioxarray>=0.19.0
+rasterio>=1.4.0
+
+
+#  pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121

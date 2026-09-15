@@ -23,7 +23,7 @@ TENSOR_PATH = PROJECT_DIR / "data" / "processed" / "model_tensors_v1.npz"
 
 spec = importlib.util.spec_from_file_location(
     "build_folds",
-    PROJECT_DIR / "scripts" / "14.build_folds.py",
+    PROJECT_DIR / "scripts" / "features" / "14.build_folds.py",
 )
 folds_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(folds_module)

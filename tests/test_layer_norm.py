@@ -55,7 +55,7 @@ def _load(name: str, filename: str):
     return module
 
 
-layer_norm_module = _load("layer_norm_module", "28.train_layer_norm.py")
+layer_norm_module = _load("layer_norm_module", "training/28.train_layer_norm.py")
 layer_norm_module.load_modules()
 baseline = layer_norm_module.baseline_module
 
