@@ -903,7 +903,7 @@ def parse_arguments() -> argparse.Namespace:
 
     parser.add_argument("--arms", nargs="+", default=list(ARMS), choices=list(ARMS))
     parser.add_argument("--horizons", nargs="+", type=int, default=[1, 2, 3, 4])
-    parser.add_argument("--variant", default="v1", choices=["v0", "v1"])
+    parser.add_argument("--variant", default="v1", choices=["v0", "v1", "v2"])
     parser.add_argument("--folds", nargs="+", type=int, default=None)
 
     for key, value in DEFAULTS.items():
