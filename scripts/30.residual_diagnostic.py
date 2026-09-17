@@ -114,7 +114,7 @@ def _load(name: str, filename: str):
 
 def load_modules() -> None:
     global baseline_module, naive, folds_module
-    baseline_module = _load("baseline_module", "16.train_gcn_gru.py")
+    baseline_module = _load("baseline_module", "training/16.train_gcn_gru.py")
     baseline_module.load_modules()
     naive = baseline_module.naive
     folds_module = baseline_module.folds_module

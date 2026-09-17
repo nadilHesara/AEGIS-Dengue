@@ -550,7 +550,7 @@ def main() -> int:
     try:
         calendar = load_calendar()
         regime = load_regime_flags()
-        tensor_sets = {variant: load_tensors(variant) for variant in ("v0", "v1")}
+        tensor_sets = {variant: load_tensors(variant) for variant in ("v0", "v1", "v2")}
     except FileNotFoundError as error:
         print(error)
         return 1
