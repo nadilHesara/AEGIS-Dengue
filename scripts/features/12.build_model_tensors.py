@@ -26,15 +26,15 @@ Three feature variants are emitted:
     v2  v1 plus two outbreak-history columns computed from the case series
         alone: `national_wave_rank` (this district's case count ranked
         against all 25 districts in the same period) and
-        `trailing_52_cumulative_cases` (this district's own cases summed over
-        the trailing 52 periods, inclusive). Both are period-local or
-        backward-looking only -- see `add_history_features` -- so they carry
-        no information a real forecast origin would not already have. The
-        residual diagnostic (`scripts/30.residual_diagnostic.py`) found both
-        proxies correlate with the baseline model's test-set error more
-        strongly than any climate channel, which is the motivation for
-        building them as real inputs rather than leaving them as a
-        diagnostic-only computation.
+        `trailing_52_cumulative_cases` (log1p of this district's own cases
+        summed over the trailing 52 periods, inclusive). Both are
+        period-local or backward-looking only -- see `add_history_features`
+        -- so they carry no information a real forecast origin would not
+        already have. The residual diagnostic
+        (`scripts/30.residual_diagnostic.py`) found both proxies correlate
+        with the baseline model's test-set error more strongly than any
+        climate channel, which is the motivation for building them as real
+        inputs rather than leaving them as a diagnostic-only computation.
 
 v1 minus v0 measures what hand-specified lags are worth on this data. That
 difference is the number a learnable lag module has to beat, so it is built
@@ -310,23 +310,41 @@ def add_history_features(panel: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
                                          scripts/30's percentile threshold
                                          does for `periods_since_outbreak`.
 
-        trailing_52_cumulative_cases    this district's own cases summed over
-                                         the trailing 52 periods, inclusive of
-                                         the current one. `min_periods=52`, so
-                                         the first 51 periods of the series
-                                         are NaN rather than a partial sum
-                                         mislabeled as a full one -- the same
-                                         convention `add_rolling_features`
-                                         uses for the climate lag means, and
-                                         for the same reason. A NaN case count
-                                         anywhere inside the trailing window
-                                         propagates to NaN rather than being
-                                         treated as zero cases observed: an
-                                         imputed count is not an observation,
-                                         and pretending otherwise here would
-                                         be exactly the fabricated-zero failure
+        trailing_52_cumulative_cases    log1p of this district's own cases
+                                         summed over the trailing 52 periods,
+                                         inclusive of the current one.
+                                         `min_periods=52`, so the first 51
+                                         periods of the series are NaN rather
+                                         than a partial sum mislabeled as a
+                                         full one -- the same convention
+                                         `add_rolling_features` uses for the
+                                         climate lag means, and for the same
+                                         reason. A NaN case count anywhere
+                                         inside the trailing window propagates
+                                         to NaN rather than being treated as
+                                         zero cases observed: an imputed count
+                                         is not an observation, and pretending
+                                         otherwise here would be exactly the
+                                         fabricated-zero failure
                                          `mask_unobserved_weather` exists to
                                          prevent for `rainy_days`.
+
+                                         `log1p` is applied to the summed
+                                         count, not to `cases` before summing
+                                         -- the sum itself stays linear, only
+                                         its scale is compressed afterwards.
+                                         Uncompressed, this column ranges into
+                                         the tens of thousands during 2017 and
+                                         z-scores to double digits of standard
+                                         deviation, which destabilised
+                                         training on the identity backbone.
+                                         `cases_log1p` already compresses raw
+                                         counts for the same reason; this is
+                                         the same fix applied to a sum instead
+                                         of a single period's count. `log1p`
+                                         propagates NaN unchanged, so the
+                                         warm-up and missing-period NaN
+                                         behaviour above is untouched by this.
     """
 
     panel = panel.copy()
@@ -337,8 +355,10 @@ def add_history_features(panel: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
 
     # Rows are ordered period_id then node_id, so within one node group they
     # are already in chronological order; `rolling` reads that order directly.
-    panel[TRAILING_CUMULATIVE_CASES] = panel.groupby("node_id")["cases"].transform(
-        lambda series: series.rolling(HISTORY_WINDOW, min_periods=HISTORY_WINDOW).sum()
+    panel[TRAILING_CUMULATIVE_CASES] = np.log1p(
+        panel.groupby("node_id")["cases"].transform(
+            lambda series: series.rolling(HISTORY_WINDOW, min_periods=HISTORY_WINDOW).sum()
+        )
     )
 
     return panel, [NATIONAL_WAVE_RANK, TRAILING_CUMULATIVE_CASES]

@@ -260,7 +260,12 @@ def test_national_wave_rank_uses_only_that_period_own_row():
 
 
 def test_trailing_cumulative_cases_sums_the_trailing_window():
-    """A known, constant case series must sum to window * value once settled."""
+    """A known, constant case series must sum to log1p(window * value) once settled.
+
+    The stored column is log1p of the rolling sum, not the sum itself -- see
+    `add_history_features`. The sum is still exactly known here; only the
+    final compression step changes what value the settled cells hold.
+    """
 
     panel = make_panel(n_periods=60, n_nodes=1)
     panel["cases"] = 10.0  # constant, so the sum once settled is exactly known
@@ -269,7 +274,8 @@ def test_trailing_cumulative_cases_sums_the_trailing_window():
     column = tensors_module.TRAILING_CUMULATIVE_CASES
 
     settled = built[built["period_id"] >= tensors_module.HISTORY_WINDOW]
-    assert (settled[column] == 10.0 * tensors_module.HISTORY_WINDOW).all()
+    expected = np.log1p(10.0 * tensors_module.HISTORY_WINDOW)
+    np.testing.assert_allclose(settled[column].to_numpy(), expected)
 
 
 def test_trailing_cumulative_cases_is_nan_during_warm_up_not_zero():
@@ -319,7 +325,8 @@ def test_trailing_cumulative_cases_propagates_a_missing_period_strictly():
 
     # a window entirely after the missing period has aged out is unaffected
     healed = built[built["period_id"] >= 30 + tensors_module.HISTORY_WINDOW]
-    assert (healed[column] == 10.0 * tensors_module.HISTORY_WINDOW).all()
+    expected = np.log1p(10.0 * tensors_module.HISTORY_WINDOW)
+    np.testing.assert_allclose(healed[column].to_numpy(), expected)
 
 
 def test_trailing_cumulative_cases_does_not_read_a_future_period():

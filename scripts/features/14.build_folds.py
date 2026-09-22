@@ -312,6 +312,30 @@ def fit_fold_statistics(
     }
 
 
+def check_statistics_are_finite(
+    statistics: dict[str, np.ndarray], variant: str, fold_id: int
+) -> None:
+    """Fail loudly if a fold's fitted statistics contain NaN or inf.
+
+    `fit_fold_statistics` already guards against a NaN climatology (both
+    fallbacks failing at once), but a non-finite `mean`, `std`,
+    `district_mean` or `global_mean` is not otherwise caught here -- and a
+    non-finite mean or std means every window scaled with it is silently
+    poisoned. Checked once per fold, right after fitting, so a bad fold stops
+    the build immediately with the variant and fold that produced it, instead
+    of surfacing hours later as an unexplained collapse in a training run
+    that consumed the bad statistics without complaint.
+    """
+
+    for key, values in statistics.items():
+        if not np.isfinite(values).all():
+            bad = np.argwhere(~np.isfinite(values))
+            raise ValueError(
+                f"variant {variant!r} fold {fold_id}: non-finite {key!r} at "
+                f"{len(bad)} position(s), first at index {tuple(bad[0])}."
+            )
+
+
 def impute(
     x: np.ndarray,
     climatology: np.ndarray,
@@ -592,6 +616,7 @@ def main() -> int:
             fit_mask = period_id <= fold["fit_end_period"]
 
             statistics = fit_fold_statistics(tensors, months, fit_mask)
+            check_statistics_are_finite(statistics, variant, fold["fold_id"])
 
             for key, value in statistics.items():
                 stacked[key].append(value)
