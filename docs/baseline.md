@@ -264,6 +264,19 @@ folds and masks.
    no border, and are both wet-zone coastal.
 8. **Gated spatial/temporal fusion.** The current architecture is
    spatial-then-temporal precisely so this gate drops in without restructuring.
+9. **Outbreak-history features.** ~~Two engineered columns — a district's rank
+   against all 25 by same-period case count, and its own cases summed over the
+   trailing 52 periods — motivated by `scripts/30`'s residual diagnostic finding
+   both correlated with the baseline's test error more strongly than any
+   existing feature.~~ **Done, 9 folds x 3 seeds at h=1 and h=1-4 — see
+   [`docs/outbreak_history_features.md`](outbreak_history_features.md).** The
+   result is horizon-dependent: near-neutral at h=1, real at h=3/h=4 —
+   `identity/shared` clears 2-3σ at every one of those horizons, the most
+   consistent positive result of anything in this group. Modest in size
+   (0.5-2.2 MAE, 3-12%), and a scaling bug in the first version (an
+   uncompressed cumulative sum reaching double-digit z-scores) collapsed fold 1
+   before the fix; both the fix and a direct leakage re-check on the real
+   tensors are documented there.
 
 ### Data debt, worth clearing early
 

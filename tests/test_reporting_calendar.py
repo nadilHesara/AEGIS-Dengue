@@ -16,7 +16,7 @@ import pytest
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 spec = importlib.util.spec_from_file_location(
-    "create_calendar", PROJECT_DIR / "scripts" / "2.create_calendar.py"
+    "create_calendar", PROJECT_DIR / "scripts" / "data" / "2.create_calendar.py"
 )
 calendar_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(calendar_module)

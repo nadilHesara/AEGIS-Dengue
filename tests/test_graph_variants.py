@@ -48,7 +48,7 @@ def _load(name: str, filename: str):
     return module
 
 
-graphs = _load("graph_module", "26.train_graph_variants.py")
+graphs = _load("graph_module", "training/26.train_graph_variants.py")
 graphs.load_modules()
 baseline = graphs.baseline_module
 

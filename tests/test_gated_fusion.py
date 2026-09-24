@@ -39,7 +39,7 @@ def _load_baseline_gcngru():
     """
 
     spec = importlib.util.spec_from_file_location(
-        "baseline_for_test", PROJECT_DIR / "scripts" / "16.train_gcn_gru.py"
+        "baseline_for_test", PROJECT_DIR / "scripts" / "training" / "16.train_gcn_gru.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

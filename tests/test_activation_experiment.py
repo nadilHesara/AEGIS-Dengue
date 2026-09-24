@@ -43,12 +43,12 @@ def load_script(name: str, filename: str):
 
 @pytest.fixture(scope="module")
 def experiment():
-    return load_script("activation_experiment", "22.train_simplex_activations.py")
+    return load_script("activation_experiment", "training/22.train_simplex_activations.py")
 
 
 @pytest.fixture(scope="module")
 def probe():
-    return load_script("activation_probe", "23.activation_gradient_probe.py")
+    return load_script("activation_probe", "evaluation/23.activation_gradient_probe.py")
 
 
 def make_metrics() -> pd.DataFrame:

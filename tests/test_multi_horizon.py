@@ -52,7 +52,7 @@ def _load(name: str, filename: str):
     return module
 
 
-multi = _load("multi_horizon_module", "27.train_multi_horizon.py")
+multi = _load("multi_horizon_module", "training/27.train_multi_horizon.py")
 multi.load_modules()
 baseline = multi.baseline_module
 

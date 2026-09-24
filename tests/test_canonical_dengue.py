@@ -18,7 +18,7 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 spec = importlib.util.spec_from_file_location(
     "create_canonical",
-    PROJECT_DIR / "scripts" / "4.create_canonical_dengue.py",
+    PROJECT_DIR / "scripts" / "data" / "4.create_canonical_dengue.py",
 )
 canonical_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(canonical_module)
