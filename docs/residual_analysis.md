@@ -4,7 +4,7 @@ Does the best model's error carry capturable structure, or is it noise?
 
 Config: identity backbone, one model per horizon (8f `separate`), `v1`, 3 seeds, headline folds [1, 2, 3, 6, 7, 8, 9], horizons [1, 4]. Residual `e = y_hat - y` on observed test cells only. Trained via `scripts/16`'s imported loop.
 
-Reproduce: `python scripts/30.residual_diagnostic.py`
+Reproduce: `python scripts/evaluation/30.residual_diagnostic.py`
 
 / RAW NUMBERS BELOW -- interpretation section is filled in after review. /
 

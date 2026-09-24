@@ -66,7 +66,7 @@ import torch
 from scipy import stats
 
 
-PROJECT_DIR = Path(__file__).resolve().parent.parent
+PROJECT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_DIR))
 
 PROCESSED_DIR = PROJECT_DIR / "data" / "processed"

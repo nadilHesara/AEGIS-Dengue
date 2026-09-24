@@ -31,7 +31,7 @@ Three feature variants are emitted:
         period-local or backward-looking only -- see `add_history_features`
         -- so they carry no information a real forecast origin would not
         already have. The residual diagnostic
-        (`scripts/30.residual_diagnostic.py`) found both proxies correlate
+        (`scripts/evaluation/30.residual_diagnostic.py`) found both proxies correlate
         with the baseline model's test-set error more strongly than any
         climate channel, which is the motivation for building them as real
         inputs rather than leaving them as a diagnostic-only computation.
@@ -86,7 +86,7 @@ ROLLING_SOURCES = (
 )
 
 # Trailing window, in reporting periods, for v2's cumulative-case history
-# column. Matches scripts/30.residual_diagnostic.py's DEPLETION_WINDOW.
+# column. Matches scripts/evaluation/30.residual_diagnostic.py's DEPLETION_WINDOW.
 HISTORY_WINDOW = 52
 
 NATIONAL_WAVE_RANK = "national_wave_rank"
