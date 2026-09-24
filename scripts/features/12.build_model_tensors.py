@@ -14,7 +14,7 @@ things happen here and nothing else.
     look backwards only and include the current period, which is observable at
     the forecast origin. Nothing here looks forward.
 
-Two feature variants are emitted, and the pair is the point:
+Three feature variants are emitted:
 
     v0  raw per-period features. The recurrent layer has to discover any lag
         structure by itself over the input window.
@@ -22,6 +22,19 @@ Two feature variants are emitted, and the pair is the point:
     v1  v0 plus trailing 4, 8 and 12 period means of rainfall, temperature and
         humidity, which is where the mosquito development lag is expected to
         sit.
+
+    v2  v1 plus two outbreak-history columns computed from the case series
+        alone: `national_wave_rank` (this district's case count ranked
+        against all 25 districts in the same period) and
+        `trailing_52_cumulative_cases` (log1p of this district's own cases
+        summed over the trailing 52 periods, inclusive). Both are
+        period-local or backward-looking only -- see `add_history_features`
+        -- so they carry no information a real forecast origin would not
+        already have. The residual diagnostic
+        (`scripts/evaluation/30.residual_diagnostic.py`) found both proxies correlate
+        with the baseline model's test-set error more strongly than any
+        climate channel, which is the motivation for building them as real
+        inputs rather than leaving them as a diagnostic-only computation.
 
 v1 minus v0 measures what hand-specified lags are worth on this data. That
 difference is the number a learnable lag module has to beat, so it is built
@@ -35,6 +48,7 @@ frozen artefact.
 Outputs:
     data/processed/model_tensors_v0.npz
     data/processed/model_tensors_v1.npz
+    data/processed/model_tensors_v2.npz
     results/models/model_tensors_report.md
 """
 
@@ -70,6 +84,13 @@ ROLLING_SOURCES = (
     "temperature_mean_c",
     "relative_humidity_mean",
 )
+
+# Trailing window, in reporting periods, for v2's cumulative-case history
+# column. Matches scripts/evaluation/30.residual_diagnostic.py's DEPLETION_WINDOW.
+HISTORY_WINDOW = 52
+
+NATIONAL_WAVE_RANK = "national_wave_rank"
+TRAILING_CUMULATIVE_CASES = "trailing_52_cumulative_cases"
 
 # Days in a mean tropical year, used for the seasonal angle. Not 365: the span
 # contains five leap years and day-of-year drifts against the season without it.
@@ -270,14 +291,101 @@ def add_rolling_features(panel: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     return panel, names
 
 
-def feature_names_for(variant: str, rolling_names: list[str]) -> list[str]:
-    """Return the ordered feature list for one variant."""
+def add_history_features(panel: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Attach the two outbreak-history columns and return their names.
+
+    Both are computed causally: a district-period's value uses only that
+    period's own row (the rank) or that district's own history at or before
+    that period (the cumulative sum). Neither reads anything from a later
+    period. The origin/target split that actually enforces causality at
+    inference time is `make_windows`'s -- these columns sit in `X` like every
+    other feature, and the model only ever sees `X` up to its own forecast
+    origin.
+
+        national_wave_rank              rank of this district's case count
+                                         among all 25 districts in the SAME
+                                         period, 1 = highest. Period-local:
+                                         no other period is touched, so this
+                                         needs no fold-aware fitting the way
+                                         scripts/30's percentile threshold
+                                         does for `periods_since_outbreak`.
+
+        trailing_52_cumulative_cases    log1p of this district's own cases
+                                         summed over the trailing 52 periods,
+                                         inclusive of the current one.
+                                         `min_periods=52`, so the first 51
+                                         periods of the series are NaN rather
+                                         than a partial sum mislabeled as a
+                                         full one -- the same convention
+                                         `add_rolling_features` uses for the
+                                         climate lag means, and for the same
+                                         reason. A NaN case count anywhere
+                                         inside the trailing window propagates
+                                         to NaN rather than being treated as
+                                         zero cases observed: an imputed count
+                                         is not an observation, and pretending
+                                         otherwise here would be exactly the
+                                         fabricated-zero failure
+                                         `mask_unobserved_weather` exists to
+                                         prevent for `rainy_days`.
+
+                                         `log1p` is applied to the summed
+                                         count, not to `cases` before summing
+                                         -- the sum itself stays linear, only
+                                         its scale is compressed afterwards.
+                                         Uncompressed, this column ranges into
+                                         the tens of thousands during 2017 and
+                                         z-scores to double digits of standard
+                                         deviation, which destabilised
+                                         training on the identity backbone.
+                                         `cases_log1p` already compresses raw
+                                         counts for the same reason; this is
+                                         the same fix applied to a sum instead
+                                         of a single period's count. `log1p`
+                                         propagates NaN unchanged, so the
+                                         warm-up and missing-period NaN
+                                         behaviour above is untouched by this.
+    """
+
+    panel = panel.copy()
+
+    panel[NATIONAL_WAVE_RANK] = panel.groupby("period_id")["cases"].rank(
+        ascending=False, method="min"
+    )
+
+    # Rows are ordered period_id then node_id, so within one node group they
+    # are already in chronological order; `rolling` reads that order directly.
+    panel[TRAILING_CUMULATIVE_CASES] = np.log1p(
+        panel.groupby("node_id")["cases"].transform(
+            lambda series: series.rolling(HISTORY_WINDOW, min_periods=HISTORY_WINDOW).sum()
+        )
+    )
+
+    return panel, [NATIONAL_WAVE_RANK, TRAILING_CUMULATIVE_CASES]
+
+
+def feature_names_for(
+    variant: str,
+    rolling_names: list[str],
+    history_names: list[str] | None = None,
+) -> list[str]:
+    """Return the ordered feature list for one variant.
+
+    `history_names` defaults to `None` (treated as empty) so callers built
+    before v2 existed -- asking only for "v0" or "v1" -- keep working
+    unchanged; only a "v2" request needs it supplied.
+    """
 
     if variant == "v0":
         return list(BASE_FEATURES)
 
     if variant == "v1":
         return list(BASE_FEATURES) + rolling_names
+
+    if variant == "v2":
+        if not history_names:
+            raise ValueError("variant 'v2' requires history_names.")
+        return list(BASE_FEATURES) + rolling_names + list(history_names)
 
     raise ValueError(f"Unknown variant {variant!r}.")
 
@@ -470,7 +578,9 @@ def format_period_ranges(periods: list[int]) -> str:
     return ", ".join(ranges)
 
 
-def write_report(summaries: dict[str, dict[str, object]], tensors_v1: dict) -> None:
+def write_report(
+    summaries: dict[str, dict[str, object]], tensors_v2: dict, history_names: list[str]
+) -> None:
     """Write the human-readable build report."""
 
     lines = [
@@ -503,8 +613,13 @@ def write_report(summaries: dict[str, dict[str, object]], tensors_v1: dict) -> N
         "| --- | --- | --- |",
     ]
 
-    for index, name in enumerate(tensors_v1["feature_names"]):
-        variant = "v0, v1" if name in BASE_FEATURES else "v1"
+    for index, name in enumerate(tensors_v2["feature_names"]):
+        if name in BASE_FEATURES:
+            variant = "v0, v1, v2"
+        elif name in history_names:
+            variant = "v2"
+        else:
+            variant = "v1, v2"
         lines.append(f"| {index} | `{name}` | {variant} |")
 
     lines += [
@@ -552,6 +667,7 @@ def write_report(summaries: dict[str, dict[str, object]], tensors_v1: dict) -> N
         "",
         "- `data/processed/model_tensors_v0.npz`",
         "- `data/processed/model_tensors_v1.npz`",
+        "- `data/processed/model_tensors_v2.npz`",
     ]
 
     REPORT_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -599,6 +715,7 @@ def main() -> int:
     panel = mask_unobserved_weather(panel)
     panel = add_base_features(panel, nodes)
     panel, rolling_names = add_rolling_features(panel)
+    panel, history_names = add_history_features(panel)
 
     print(f"Panel rows:       {len(panel)}")
     print(f"Reporting periods:{panel['period_id'].nunique():>6}")
@@ -610,8 +727,8 @@ def main() -> int:
     summaries: dict[str, dict[str, object]] = {}
     built: dict[str, dict[str, np.ndarray]] = {}
 
-    for variant in ("v0", "v1"):
-        features = feature_names_for(variant, rolling_names)
+    for variant in ("v0", "v1", "v2"):
+        features = feature_names_for(variant, rolling_names, history_names)
         tensors = build_tensors(panel, features)
 
         output_path = PROCESSED_DIR / f"model_tensors_{variant}.npz"
@@ -630,7 +747,7 @@ def main() -> int:
         print_summary(variant, summary)
         print(f"  Wrote {output_path.relative_to(PROJECT_DIR)}")
 
-    write_report(summaries, built["v1"])
+    write_report(summaries, built["v2"], history_names)
     print(f"\nWrote {REPORT_PATH.relative_to(PROJECT_DIR)}")
 
     return 0

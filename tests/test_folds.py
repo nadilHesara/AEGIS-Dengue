@@ -297,6 +297,39 @@ def test_transform_removes_every_nan(calendar, synthetic_folds):
     assert np.isfinite(scaled).all()
 
 
+def test_check_statistics_are_finite_accepts_normal_statistics(
+    calendar, synthetic_folds
+):
+    tensors = make_tensors(calendar)
+    months = calendar["month"].to_numpy()
+    fold = synthetic_folds[0]
+    fit_mask = tensors["period_id"] <= fold["fit_end_period"]
+
+    statistics = folds_module.fit_fold_statistics(tensors, months, fit_mask)
+
+    # must not raise
+    folds_module.check_statistics_are_finite(statistics, "v_test", fold["fold_id"])
+
+
+def test_check_statistics_are_finite_rejects_a_non_finite_std():
+    """A poisoned std (e.g. from an unscaled, extreme-magnitude feature)
+
+    must fail the build loudly, with the variant and fold named, rather than
+    silently writing a bad fold_preprocessing_*.npz.
+    """
+
+    statistics = {
+        "climatology": np.zeros((4, 12, 3), dtype=np.float32),
+        "district_mean": np.zeros((4, 3), dtype=np.float32),
+        "global_mean": np.zeros(3, dtype=np.float32),
+        "mean": np.zeros(3, dtype=np.float32),
+        "std": np.array([1.0, np.inf, 1.0], dtype=np.float32),
+    }
+
+    with pytest.raises(ValueError, match="v2.*fold 3.*std"):
+        folds_module.check_statistics_are_finite(statistics, "v2", 3)
+
+
 def test_a_district_month_with_no_history_falls_back(calendar, synthetic_folds):
     tensors = make_tensors(calendar)
     months = calendar["month"].to_numpy()

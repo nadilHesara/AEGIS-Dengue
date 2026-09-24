@@ -214,6 +214,206 @@ def test_variants_differ_only_by_the_rolling_block():
 
 
 # ---------------------------------------------------------------------------
+# v2 -- outbreak-history features
+# ---------------------------------------------------------------------------
+
+def test_national_wave_rank_is_1_for_the_highest_case_count():
+    """Rank 1 goes to the district reporting the most cases that period."""
+
+    panel = make_panel(n_periods=10, n_nodes=4)
+    # Make node 2 the clear leader at every period; make_panel's default
+    # cases = period_id + node_id already ranks node 3 highest, so override it.
+    panel.loc[panel["node_id"] == 2, "cases"] = 9999.0
+
+    built, _ = tensors_module.add_history_features(panel)
+
+    leader = built[built["node_id"] == 2]
+    assert (leader[tensors_module.NATIONAL_WAVE_RANK] == 1).all()
+
+    # every other district in the same period ranks behind it
+    others = built[built["node_id"] != 2]
+    assert (others[tensors_module.NATIONAL_WAVE_RANK] > 1).all()
+
+
+def test_national_wave_rank_uses_only_that_period_own_row():
+    """Changing one district's cases at period t must not move another period's ranks."""
+
+    panel = make_panel(n_periods=10, n_nodes=4)
+    baseline, _ = tensors_module.add_history_features(panel)
+
+    spiked = make_panel(n_periods=10, n_nodes=4)
+    spiked.loc[
+        (spiked["period_id"] == 5) & (spiked["node_id"] == 0), "cases"
+    ] = 9999.0
+    spiked, _ = tensors_module.add_history_features(spiked)
+
+    untouched = baseline["period_id"] != 5
+    pd.testing.assert_series_equal(
+        baseline.loc[untouched, tensors_module.NATIONAL_WAVE_RANK],
+        spiked.loc[untouched, tensors_module.NATIONAL_WAVE_RANK],
+    )
+    # and period 5 itself does change, or the test above would pass on a
+    # column that never moves regardless of input
+    assert not baseline.loc[~untouched, tensors_module.NATIONAL_WAVE_RANK].equals(
+        spiked.loc[~untouched, tensors_module.NATIONAL_WAVE_RANK]
+    )
+
+
+def test_trailing_cumulative_cases_sums_the_trailing_window():
+    """A known, constant case series must sum to log1p(window * value) once settled.
+
+    The stored column is log1p of the rolling sum, not the sum itself -- see
+    `add_history_features`. The sum is still exactly known here; only the
+    final compression step changes what value the settled cells hold.
+    """
+
+    panel = make_panel(n_periods=60, n_nodes=1)
+    panel["cases"] = 10.0  # constant, so the sum once settled is exactly known
+
+    built, _ = tensors_module.add_history_features(panel)
+    column = tensors_module.TRAILING_CUMULATIVE_CASES
+
+    settled = built[built["period_id"] >= tensors_module.HISTORY_WINDOW]
+    expected = np.log1p(10.0 * tensors_module.HISTORY_WINDOW)
+    np.testing.assert_allclose(settled[column].to_numpy(), expected)
+
+
+def test_trailing_cumulative_cases_is_nan_during_warm_up_not_zero():
+    """The first HISTORY_WINDOW - 1 periods must be NaN, never a partial sum.
+
+    This is the check the task turns on: a partial 52-period sum must never be
+    silently labelled a full one, the same rule `add_rolling_features` already
+    applies to the climate lag means.
+    """
+
+    panel = make_panel(n_periods=60, n_nodes=1)
+    panel["cases"] = 10.0
+
+    built, _ = tensors_module.add_history_features(panel)
+    column = tensors_module.TRAILING_CUMULATIVE_CASES
+
+    warm_up = built[built["period_id"] < tensors_module.HISTORY_WINDOW]
+    assert warm_up[column].isna().all()
+    # and not merely absent from the frame -- genuinely NaN, not zero
+    assert not (warm_up[column] == 0).any()
+
+
+def test_trailing_cumulative_cases_propagates_a_missing_period_strictly():
+    """One NaN case count inside the window must NaN the whole sum for it --
+    not be treated as zero cases observed.
+
+    This is the "missing stays missing" convention confirmed for this feature:
+    skip-NaN summing would quietly convert an unobserved period into an
+    assumed zero-case week, exactly the fabricated-observation failure
+    `mask_unobserved_weather` exists to prevent for `rainy_days`.
+    """
+
+    panel = make_panel(n_periods=60, n_nodes=1)
+    panel["cases"] = 10.0
+    panel.loc[panel["period_id"] == 30, "cases"] = np.nan
+
+    built, _ = tensors_module.add_history_features(panel)
+    column = tensors_module.TRAILING_CUMULATIVE_CASES
+
+    # every window from period 30 through period 30 + HISTORY_WINDOW - 1
+    # includes the missing period_id 30 and must be NaN
+    affected = built[
+        (built["period_id"] >= 30)
+        & (built["period_id"] < 30 + tensors_module.HISTORY_WINDOW)
+    ]
+    assert affected[column].isna().all()
+
+    # a window entirely after the missing period has aged out is unaffected
+    healed = built[built["period_id"] >= 30 + tensors_module.HISTORY_WINDOW]
+    expected = np.log1p(10.0 * tensors_module.HISTORY_WINDOW)
+    np.testing.assert_allclose(healed[column].to_numpy(), expected)
+
+
+def test_trailing_cumulative_cases_does_not_read_a_future_period():
+    """Changing a later period's cases must not move an earlier window's sum."""
+
+    panel = make_panel(n_periods=60, n_nodes=1)
+    panel["cases"] = 10.0
+    baseline, _ = tensors_module.add_history_features(panel.copy())
+
+    future_changed = panel.copy()
+    future_changed.loc[future_changed["period_id"] == 55, "cases"] = 9999.0
+    future_changed, _ = tensors_module.add_history_features(future_changed)
+
+    column = tensors_module.TRAILING_CUMULATIVE_CASES
+    before = baseline["period_id"] < 55
+
+    pd.testing.assert_series_equal(
+        baseline.loc[before, column], future_changed.loc[before, column]
+    )
+    assert not baseline.loc[~before, column].equals(
+        future_changed.loc[~before, column]
+    )
+
+
+def test_v2_adds_exactly_the_two_history_columns_after_v1():
+    panel = tensors_module.add_base_features(make_panel(), make_nodes())
+    panel, rolling_names = tensors_module.add_rolling_features(panel)
+    panel, history_names = tensors_module.add_history_features(panel)
+
+    assert history_names == [
+        tensors_module.NATIONAL_WAVE_RANK,
+        tensors_module.TRAILING_CUMULATIVE_CASES,
+    ]
+
+    v1_features = tensors_module.feature_names_for("v1", rolling_names)
+    v2_features = tensors_module.feature_names_for("v2", rolling_names, history_names)
+
+    assert v2_features[: len(v1_features)] == v1_features
+    assert v2_features[len(v1_features) :] == history_names
+    assert len(v2_features) == len(v1_features) + 2
+
+
+def test_feature_names_for_v2_requires_history_names():
+    with pytest.raises(ValueError, match="requires history_names"):
+        tensors_module.feature_names_for("v2", rolling_names=[])
+
+
+def test_v2_tensor_build_end_to_end():
+    """The full v0/v1/v2 pipeline the task describes, run on synthetic data."""
+
+    panel = make_panel(n_periods=60, n_nodes=3)
+    nodes = make_nodes(3)
+
+    tensors_module.check_grid(panel, nodes)
+
+    panel = tensors_module.mask_unobserved_weather(panel)
+    panel = tensors_module.add_base_features(panel, nodes)
+    panel, rolling_names = tensors_module.add_rolling_features(panel)
+    panel, history_names = tensors_module.add_history_features(panel)
+
+    v1 = tensors_module.build_tensors(
+        panel, tensors_module.feature_names_for("v1", rolling_names)
+    )
+    v2 = tensors_module.build_tensors(
+        panel, tensors_module.feature_names_for("v2", rolling_names, history_names)
+    )
+
+    n_v1 = v1["X"].shape[2]
+    assert v2["X"].shape[2] == n_v1 + 2
+    # v2 is v1 plus the two new columns, nothing reordered or dropped
+    np.testing.assert_allclose(v1["X"], v2["X"][:, :, :n_v1])
+
+    # the warm-up NaN survives all the way through the reshape into X
+    rank_index = list(v2["feature_names"]).index(tensors_module.NATIONAL_WAVE_RANK)
+    cumulative_index = list(v2["feature_names"]).index(
+        tensors_module.TRAILING_CUMULATIVE_CASES
+    )
+    assert not np.isnan(v2["X"][:, :, rank_index]).any()
+    assert np.isnan(
+        v2["X"][: tensors_module.HISTORY_WINDOW - 1, :, cumulative_index]
+    ).all()
+    assert not np.isnan(
+        v2["X"][tensors_module.HISTORY_WINDOW - 1 :, :, cumulative_index]
+    ).any()
+
+
+# ---------------------------------------------------------------------------
 # Window alignment
 # ---------------------------------------------------------------------------
 
