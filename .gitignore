@@ -1,6 +1,9 @@
 .venv
 
-data
+data/raw/chirps_chunks
+data/raw/era5_chunks
+data/processed/
+data/interim/
 
 !data/
 !data/raw/
@@ -20,10 +23,9 @@ __pycache__/
 .pytest_cache/
 
 
-results/
+results/**/*.csv
 
 docs/short paper.tex
-!results/
 !results/figures/
 !results/figures/.gitkeep
 !results/tables/
@@ -32,6 +34,7 @@ docs/short paper.tex
 !results/predictions/.gitkeep
 !results/reports/
 !results/reports/.gitkeep
+!results/models/adjacency_report.md
 
 models/checkpoints/*
 !models/checkpoints/.gitkeep
