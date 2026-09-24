@@ -22,6 +22,7 @@ __pycache__/
 
 results/
 
+docs/short paper.tex
 !results/
 !results/figures/
 !results/figures/.gitkeep
