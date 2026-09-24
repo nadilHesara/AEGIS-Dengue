@@ -39,3 +39,23 @@ models/weights/*
 !models/weights/.gitkeep
 models/versions/*
 !models/versions/.gitkeep
+
+# Generated pipeline outputs. The "!data/" and "!results/" lines above re-include
+# those folders, so the generated files are ignored explicitly here. Files that are
+# already committed (dengue CSV, adjacency.npz, nodes.csv, ...) stay tracked.
+data/interim/*
+!data/interim/.gitkeep
+!data/interim/district_name_map.csv
+data/processed/*
+!data/processed/.gitkeep
+!data/processed/adjacency.npz
+!data/processed/nodes.csv
+data/raw/climate_daily_district.csv
+data/raw/open_meteo_cache/
+results/data_validation/
+results/models/*
+!results/models/adjacency_report.md
+results/benchmark/predictions/
+results/benchmark/selection/
+results/benchmark/onset/*.parquet
+results/benchmark/figures/
