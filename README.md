@@ -88,6 +88,7 @@ runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 | 8g. Layer normalisation before the prediction head                    | Done. **Not established on accuracy** — the headline gain is the 2017 fold and nothing else (±0.31 MAE over the other six). The real result is **24–51% lower seed variance at every horizon** — see §8g.          |
 | 8h. Climate ablation at h = 1–4 (three arms, shuffle control)         | Done. **At h=4 climate content is load-bearing**: a shuffle control holding capacity fixed costs +1.55 MAE (p=0.016) and +3.10 peak MAE, removing half of §8f's skill. Monotonic in the horizon — see §8h.          |
 | 9. Gated fusion, climate ablation at h=4                              | Dual graph **answered negatively** by §8e. Climate ablation **done** in §8h. See §9.                                                                                                                               |
+| 10. Negative Binomial likelihood (Component C)                        | **Done.** **Breaks the 1-week persistence barrier**: 15.85 MAE (single-seed) / **15.69 (ensemble)** vs persistence 16.42. Beats persistence on **all 7/7 headline folds**, on peak MAE (25.32 vs 26.61), and on 2017 (35.47 vs 36.08). See [docs/negative_binomial.md](docs/negative_binomial.md). |
 
 **The one-paragraph summary of where the model stands:** **at one week ahead, no
 configuration in this repository beats persistence** — five separate changes
@@ -1148,6 +1149,7 @@ were independently re-verified this session by rerunning the scripts twice
 - [`docs/layer_norm.md`](docs/layer_norm.md) — LayerNorm before the head: an accuracy null and a seed-variance result
 - [`docs/climate_ablation.md`](docs/climate_ablation.md) — what causes the h=3–4 skill: the shuffle control that attributes it to climate
 - [`docs/model_tensors.md`](docs/model_tensors.md) — tensors, folds, adjacency
+- [`docs/negative_binomial.md`](docs/negative_binomial.md) — Negative Binomial probabilistic head: breaking the 1-week persistence barrier
 - [`docs/learnable_lags_results.md`](docs/learnable_lags_results.md) — Component A
 - [`docs/climate_dataset_schema.md`](docs/climate_dataset_schema.md) — ERA5 extraction spec
 - [`docs/reporting_calendar.md`](docs/reporting_calendar.md) — the chronological key
