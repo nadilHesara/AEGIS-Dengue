@@ -301,7 +301,7 @@ def main():
     parser.add_argument("--folds", type=int, nargs="+", default=None, help="Folds to train on")
     parser.add_argument("--seeds", type=int, default=DEFAULTS["seeds"], help="Number of seeds")
     parser.add_argument("--backbone", type=str, default=DEFAULTS["backbone"], choices=["identity", "contiguity"])
-    parser.add_argument("--variant", type=str, default=DEFAULTS["variant"], choices=["v0", "v1", "v2"])
+    parser.add_argument("--variant", type=str, default=DEFAULTS["variant"], choices=["v0", "v1", "v2", "v3"])
     parser.add_argument("--horizon", type=int, default=DEFAULTS["horizon"])
     parser.add_argument("--epochs", type=int, default=DEFAULTS["max_epochs"])
     parser.add_argument("--patience", type=int, default=DEFAULTS["patience"])

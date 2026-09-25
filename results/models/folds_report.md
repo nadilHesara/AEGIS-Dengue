@@ -63,6 +63,7 @@ Cells filled per fold:
 | `v0` | 0 | 0 |
 | `v1` | 1575 | 1575 |
 | `v2` | 2850 | 2850 |
+| `v3` | 2875 | 2875 |
 
 Targets are never imputed. A missing case count stays NaN, is flagged
 in `y_mask`, and is excluded from the loss and from every metric.

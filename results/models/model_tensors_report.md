@@ -13,6 +13,7 @@ and imputation can be fitted on the training split alone.
 | `v0` | 1012x25x14 | 14 | 987 of 1000 |
 | `v1` | 1012x25x23 | 23 | 976 of 1000 |
 | `v2` | 1012x25x25 | 25 | 936 of 1000 |
+| `v3` | 1012x25x28 | 28 | 936 of 1000 |
 
 ## Features
 
@@ -122,6 +123,39 @@ Total NaN cells: 4066
 | `relative_humidity_mean_roll12` | 350 |
 | `national_wave_rank` | 1 |
 | `trailing_52_cumulative_cases` | 1289 |
+
+Usable target periods: 64 to 999
+
+Windows dropped for a NaN input: 64. For a target with no observed district: 0. Kept with a partly masked target: 1.
+
+Dropped target periods: 13-63, 1000-1012
+
+### `v3`
+
+Total NaN cells: 4091
+
+| Feature | NaN cells |
+| --- | --- |
+| `cases_log1p` | 1 |
+| `rainfall_daily_mean_mm` | 75 |
+| `rainy_days_frac` | 75 |
+| `temperature_mean_c` | 75 |
+| `diurnal_range_c` | 75 |
+| `dewpoint_mean_c` | 75 |
+| `relative_humidity_mean` | 75 |
+| `wind_speed_mean` | 75 |
+| `rainfall_daily_mean_mm_roll4` | 150 |
+| `rainfall_daily_mean_mm_roll8` | 250 |
+| `rainfall_daily_mean_mm_roll12` | 350 |
+| `temperature_mean_c_roll4` | 150 |
+| `temperature_mean_c_roll8` | 250 |
+| `temperature_mean_c_roll12` | 350 |
+| `relative_humidity_mean_roll4` | 150 |
+| `relative_humidity_mean_roll8` | 250 |
+| `relative_humidity_mean_roll12` | 350 |
+| `national_wave_rank` | 1 |
+| `trailing_52_cumulative_cases` | 1289 |
+| `neighbor_case_velocity` | 25 |
 
 Usable target periods: 64 to 999
 

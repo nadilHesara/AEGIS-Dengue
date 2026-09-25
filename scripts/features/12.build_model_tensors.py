@@ -92,6 +92,11 @@ HISTORY_WINDOW = 52
 NATIONAL_WAVE_RANK = "national_wave_rank"
 TRAILING_CUMULATIVE_CASES = "trailing_52_cumulative_cases"
 
+NEIGHBOR_CASES_MEAN = "neighbor_cases_log1p_mean"
+NEIGHBOR_CASES_MAX = "neighbor_cases_log1p_max"
+NEIGHBOR_CASE_VELOCITY = "neighbor_case_velocity"
+NEIGHBOR_FEATURES = [NEIGHBOR_CASES_MEAN, NEIGHBOR_CASES_MAX, NEIGHBOR_CASE_VELOCITY]
+
 # Days in a mean tropical year, used for the seasonal angle. Not 365: the span
 # contains five leap years and day-of-year drifts against the season without it.
 DAYS_PER_YEAR = 365.25
@@ -364,6 +369,42 @@ def add_history_features(panel: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     return panel, [NATIONAL_WAVE_RANK, TRAILING_CUMULATIVE_CASES]
 
 
+def add_neighbor_features(
+    panel: pd.DataFrame,
+    adjacency_binary: np.ndarray,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Add causal spatial neighbor features using queen contiguity.
+
+    Computes for each district i and period t:
+    1. neighbor_cases_log1p_mean: Mean log1p(cases) of adjacent contiguous districts.
+    2. neighbor_cases_log1p_max: Maximum log1p(cases) among adjacent contiguous districts.
+    3. neighbor_case_velocity: Week-over-week change in neighbor mean case count.
+
+    These are strictly causal: they only access counts at period t and t-1,
+    providing regional wave awareness without blurring local signals.
+    """
+    panel = panel.copy()
+    c = panel.pivot(index="period_id", columns="node_id", values="cases").to_numpy()
+    log_c = np.log1p(c)
+    n_nodes = adjacency_binary.shape[0]
+
+    n_mean = np.stack(
+        [np.nanmean(log_c[:, np.where(adjacency_binary[i] == 1)[0]], axis=1) for i in range(n_nodes)],
+        axis=1,
+    )
+    n_max = np.stack(
+        [np.nanmax(log_c[:, np.where(adjacency_binary[i] == 1)[0]], axis=1) for i in range(n_nodes)],
+        axis=1,
+    )
+    n_vel = np.diff(n_mean, axis=0, prepend=np.nan)
+
+    panel[NEIGHBOR_CASES_MEAN] = n_mean.ravel()
+    panel[NEIGHBOR_CASES_MAX] = n_max.ravel()
+    panel[NEIGHBOR_CASE_VELOCITY] = n_vel.ravel()
+
+    return panel, list(NEIGHBOR_FEATURES)
+
+
 def feature_names_for(
     variant: str,
     rolling_names: list[str],
@@ -373,7 +414,7 @@ def feature_names_for(
 
     `history_names` defaults to `None` (treated as empty) so callers built
     before v2 existed -- asking only for "v0" or "v1" -- keep working
-    unchanged; only a "v2" request needs it supplied.
+    unchanged; only a "v2" or "v3" request needs it supplied.
     """
 
     if variant == "v0":
@@ -386,6 +427,11 @@ def feature_names_for(
         if not history_names:
             raise ValueError("variant 'v2' requires history_names.")
         return list(BASE_FEATURES) + rolling_names + list(history_names)
+
+    if variant == "v3":
+        if not history_names:
+            raise ValueError("variant 'v3' requires history_names.")
+        return list(BASE_FEATURES) + rolling_names + list(history_names) + list(NEIGHBOR_FEATURES)
 
     raise ValueError(f"Unknown variant {variant!r}.")
 
@@ -716,6 +762,8 @@ def main() -> int:
     panel = add_base_features(panel, nodes)
     panel, rolling_names = add_rolling_features(panel)
     panel, history_names = add_history_features(panel)
+    adjacency_binary = np.load(PROCESSED_DIR / "adjacency.npz", allow_pickle=True)["A_binary"]
+    panel, neighbor_names = add_neighbor_features(panel, adjacency_binary)
 
     print(f"Panel rows:       {len(panel)}")
     print(f"Reporting periods:{panel['period_id'].nunique():>6}")
@@ -727,7 +775,7 @@ def main() -> int:
     summaries: dict[str, dict[str, object]] = {}
     built: dict[str, dict[str, np.ndarray]] = {}
 
-    for variant in ("v0", "v1", "v2"):
+    for variant in ("v0", "v1", "v2", "v3"):
         features = feature_names_for(variant, rolling_names, history_names)
         tensors = build_tensors(panel, features)
 
