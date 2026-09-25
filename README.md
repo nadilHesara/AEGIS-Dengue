@@ -1139,6 +1139,7 @@ were independently re-verified this session by rerunning the scripts twice
 
 ## Related documents
 
+- [`docs/new_findings_report.md`](docs/new_findings_report.md) — **Comprehensive report on post-paper innovations, multi-horizon results, and v3 spatial features**
 - [`docs/running_from_zero.md`](docs/running_from_zero.md) — full rebuild instructions
 - [`docs/baseline.md`](docs/baseline.md) — baseline architecture and full results
 - [`docs/improvements.md`](docs/improvements.md) — the objective-fix work
