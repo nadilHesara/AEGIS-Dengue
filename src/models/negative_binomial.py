@@ -76,11 +76,32 @@ def negative_binomial_nll(
     return -log_prob
 
 
+def compute_level_weights(anchor: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Compute per-cell weight from origin case level.
+
+    anchor: log1p(cases) at origin, shape [batch, nodes] or [batch, nodes, horizons]
+    mask: observation mask, matching anchor dimensions or broadcastable
+
+    Normalised to mean 1 over observed cells so the loss scale is preserved.
+    """
+    if anchor.ndim == 2 and mask.ndim == 3:
+        weight = anchor.unsqueeze(-1).expand_as(mask)
+    elif anchor.ndim == 2 and mask.ndim == 2:
+        weight = anchor
+    else:
+        weight = anchor
+
+    observed = mask.sum().clamp(min=1.0)
+    mean = (weight * mask).sum() / observed
+    return weight / mean.clamp(min=1e-6)
+
+
 def masked_negative_binomial_loss(
     mu: torch.Tensor,
     alpha: torch.Tensor,
     target: torch.Tensor,
     mask: torch.Tensor,
+    weight: torch.Tensor | None = None,
     eps: float = 1e-6,
 ) -> torch.Tensor:
     """Masked Negative Binomial negative log-likelihood over observed cells.
@@ -90,14 +111,19 @@ def masked_negative_binomial_loss(
         alpha: Predicted overdispersion parameter.
         target: Target case counts.
         mask: Binary observation mask (1 for observed, 0 for missing).
+        weight: Optional per-cell weight tensor (e.g. from compute_level_weights).
         eps: Small constant for denominator clamp.
 
     Returns:
-        Scalar loss normalized by number of observed cells.
+        Scalar loss normalized by total effective weight of observed cells.
     """
     nll = negative_binomial_nll(mu, alpha, target, eps=eps)
-    effective = nll * mask
-    denominator = mask.sum().clamp(min=1.0)
+    if weight is not None:
+        effective = nll * mask * weight
+        denominator = (mask * weight).sum().clamp(min=1.0)
+    else:
+        effective = nll * mask
+        denominator = mask.sum().clamp(min=1.0)
     return effective.sum() / denominator
 
 
@@ -113,9 +139,10 @@ class NegBinHead(nn.Module):
     Overdispersion α is constrained strictly positive via softplus.
     """
 
-    def __init__(self, hidden_dim: int, horizon: int = 1):
+    def __init__(self, hidden_dim: int, horizon: int = 1, cumulative: bool = False):
         super().__init__()
         self.horizon = horizon
+        self.cumulative = cumulative
         self.mu_linear = nn.Linear(hidden_dim, horizon)
         self.alpha_linear = nn.Linear(hidden_dim, horizon)
 
@@ -154,7 +181,13 @@ class NegBinHead(nn.Module):
         alpha_raw = self.alpha_linear(hidden)
 
         delta_mu = delta_mu.view(batch, nodes, self.horizon)
-        # Clamp delta to prevent float exp overflow: [-10, 10] covers factors from 4.5e-5 to 2.2e4
+
+        if self.cumulative and self.horizon > 1:
+            # Cumulative trajectory: each horizon models incremental week-over-week rate
+            delta_mu = delta_mu.clamp(min=-3.0, max=3.0)
+            delta_mu = torch.cumsum(delta_mu, dim=-1)
+
+        # Clamp total delta to prevent float exp overflow: [-10, 10]
         delta_mu = delta_mu.clamp(min=-10.0, max=10.0)
 
         # Compute anchored mean μ: exp(anchor + Δ)
@@ -176,12 +209,14 @@ class NegBinGCNGRU(nn.Module):
         self,
         backbone: nn.Module,
         horizon: int = 1,
+        cumulative: bool = False,
     ):
         super().__init__()
         self.backbone = backbone
         self.horizon = horizon
+        self.cumulative = cumulative
         hidden_dim = backbone.gru.hidden_size
-        self.head = NegBinHead(hidden_dim, horizon=horizon)
+        self.head = NegBinHead(hidden_dim, horizon=horizon, cumulative=cumulative)
 
         # Bypass backbone's original linear head to keep parameter count honest
         self.backbone.head = nn.Identity()

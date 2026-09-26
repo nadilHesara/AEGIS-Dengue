@@ -8,6 +8,7 @@ import torch
 from src.models.negative_binomial import (
     NegBinGCNGRU,
     NegBinHead,
+    compute_level_weights,
     compute_outbreak_probability,
     compute_prediction_intervals,
     masked_negative_binomial_loss,
@@ -142,3 +143,47 @@ def test_prediction_intervals_and_outbreak_prob():
     assert (prob >= 0.0).all() and (prob <= 1.0).all()
     # District with mean 50 should have higher outbreak probability than district with mean 20
     assert prob[1] > prob[0]
+
+
+def test_level_weighted_loss():
+    """Verify level weights normalize to mean 1 and scale loss appropriately."""
+    anchor = torch.log1p(torch.tensor([[10.0, 50.0], [5.0, 100.0]]))  # [2, 2]
+    mask = torch.ones(2, 2)
+
+    weights = compute_level_weights(anchor, mask)
+    assert weights.shape == (2, 2)
+    assert torch.allclose(weights.mean(), torch.tensor(1.0), atol=1e-5)
+    # Higher anchor must receive higher weight
+    assert weights[1, 1] > weights[1, 0]
+
+    mu = torch.full((2, 2), 20.0)
+    alpha = torch.full((2, 2), 0.5)
+    target = torch.tensor([[15.0, 60.0], [8.0, 120.0]])
+
+    unweighted_loss = masked_negative_binomial_loss(mu, alpha, target, mask)
+    weighted_loss = masked_negative_binomial_loss(mu, alpha, target, mask, weight=weights)
+
+    assert torch.isfinite(weighted_loss)
+    assert weighted_loss > 0
+
+
+def test_cumulative_trajectory_head():
+    """Verify cumulative trajectory parameterization cascades multipliers across horizons."""
+    head = NegBinHead(hidden_dim=16, horizon=4, cumulative=True)
+    # Zero init should produce persistence exactly across all horizons
+    hidden = torch.zeros(10, 16)
+    anchor = torch.log1p(torch.tensor([[25.0]] * 10))
+    mu, alpha = head(hidden, anchor)
+
+    assert mu.shape == (10, 1, 4)
+    # At zero init, mu == exp(anchor) == 26.0 for all horizons
+    assert torch.allclose(mu, torch.tensor(26.0), atol=1e-5)
+
+    # Set non-zero weights: positive growth rate of +0.1 per week
+    with torch.no_grad():
+        head.mu_linear.bias.copy_(torch.tensor([0.1, 0.1, 0.1, 0.1]))
+
+    mu_growth, _ = head(hidden, anchor)
+    # Check that each horizon strictly grows: mu[h=1] < mu[h=2] < mu[h=3] < mu[h=4]
+    for h in range(3):
+        assert (mu_growth[..., h] < mu_growth[..., h + 1]).all()
