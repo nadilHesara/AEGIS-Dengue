@@ -15,8 +15,8 @@ This report provides a comprehensive scientific evaluation of the probabilistic 
   * **$h=2$ (2 weeks ahead):** **19.18 MAE** (Ensemble) vs Persistence **20.23**
   * **$h=3$ (3 weeks ahead):** **22.59 MAE** (Ensemble) vs Persistence **24.81**
   * **$h=4$ (4 weeks ahead):** **25.44 MAE** (Ensemble) vs Persistence **28.78**
-* **Dominance on Outbreak Peak Transmission:** At a 4-week lead time ($h=4$), the Multi-Horizon NegBin model lowers Peak MAE from **48.71 (Persistence)** and **42.64 (`gru_v2_quantile_lw`)** down to **39.23 (Ensemble)**—an unprecedented **19.5% reduction in outbreak surge error**.
-* **Historic 2017 National Epidemic Benchmark:** In the 2017 epidemic (Fold 1), NegBin achieves the lowest error recorded across the entire codebase at every single lead time ($h=1$: **34.78**, $h=2$: **44.54**, $h=3$: **53.51**, $h=4$: **60.83**), decisively outperforming `gru_v2_quantile_lw` ($h=1$: 36.86, $h=4$: 62.28) and baseline GCN+GRU (54.81).
+* **Dominance on Outbreak Peak Transmission:** At a 4-week lead time ($h=4$), the Multi-Horizon NegBin model lowers Peak MAE from **47.98 (Persistence)** and **42.25 (`gru_v2_quantile_lw` Ens)** down to **39.23 (v3 Ensemble)**—an unprecedented reduction in outbreak surge error.
+* **Historic 2017 National Epidemic Benchmark:** In the 2017 epidemic (Fold 1), NegBin achieves the lowest error recorded across the entire codebase at every single lead time ($h=1$: **34.01**, $h=2$: **42.69**, $h=3$: **52.42**, $h=4$: **60.70** on $v4$), decisively outperforming `gru_v2_quantile_lw` ($h=1$: 36.61, $h=4$: 61.81) and baseline GCN+GRU (54.81).
 * **Statistical Significance:** Paired $t$-tests across the 7 headline walk-forward test folds confirm statistically significant superiority over persistence ($t = -8.253, p = 0.0002, \text{Cohen's } d = -3.12$, winning 7 of 7 folds).
 * **Architectural Efficiency:** Unlike separate per-horizon quantile architectures requiring 12 independent neural models, the Multi-Horizon NegBin model trains a single shared GRU trunk with 4 lightweight linear projection heads (only **8,226 parameters**), training in seconds on commodity CPU.
 
@@ -94,9 +94,9 @@ All models were evaluated using identical walk-forward temporal cross-validation
 
 The table below compiles the benchmark models from `origin` alongside our Negative Binomial architectures:
 
-| Model / Architecture | Model Type | $h=1$ MAE | $h=2$ MAE | $h=3$ MAE | $h=4$ MAE | $h=4$ Peak MAE | 2017 Epidemic ($h=1$) | 2017 Epidemic ($h=4$) | Total Models / Heads |
+| Model / Architecture | Model Type | h=1 MAE | h=2 MAE | h=3 MAE | h=4 MAE | h=4 Peak MAE | 2017 Epidemic (h=1) | 2017 Epidemic (h=4) | Total Models / Heads |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Naive Persistence Reference** | Deterministic Baseline | 16.42 | 20.23 | 24.81 | 28.78 | 48.71 | 36.08 | 75.73 | — |
+| Naive Persistence Reference | Deterministic Baseline | 16.42 | 20.16 | 24.58 | 28.47 | 47.98 | 36.08 | 75.73 | — |
 | `ridge_v2` | Regularized Linear | 17.96 | 21.39 | 24.24 | 26.70 | 48.55 | 46.42 | 74.91 | 4 separate |
 | `lgbm_v2` | Gradient Boosted Trees | 16.99 | 21.05 | 24.30 | 27.16 | 46.42 | 45.17 | 79.68 | 4 separate |
 | `gcn_v2` | Contiguity Graph + GRU | 17.84 | 23.30 | 25.46 | 27.59 | 46.26 | 46.46 | 78.72 | 4 separate |
@@ -105,11 +105,11 @@ The table below compiles the benchmark models from `origin` alongside our Negati
 | `gru_v2_quantile` | Pinball Quantile GRU | 15.93 | 19.23 | 22.43 | 25.06 | 43.11 | 38.28 | 63.86 | 4 separate |
 | `gru_v2_quantile_lw` (Single-Seed) | Level-Weighted Quantile GRU | 15.70 | 19.00 | 22.38 | 24.58 | 42.64 | 36.86 | 62.28 | 12 separate |
 | `gru_v2_quantile_lw` (Ensemble) | Level-Weighted Quantile GRU | **15.58** | **18.78** | **22.20** | **24.33** | 42.25 | 36.61 | 61.81 | 12 separate |
-| **Multi-Horizon NegBin ($v3$, Single-Seed)** | Shared Trunk Probabilistic | 16.09 | 19.44 | 22.91 | 25.85 | 39.92 | 34.39 | 61.01 | **1 shared model** |
+| **Multi-Horizon NegBin ($v3$, Single-Seed)** | Shared Trunk Probabilistic | 16.09 | 19.44 | 22.91 | 25.85 | 39.92 | 35.19 | 61.55 | **1 shared model** |
 | **Multi-Horizon NegBin ($v3$, Ensemble)** | Shared Trunk Probabilistic | 15.88 | 19.18 | 22.59 | 25.44 | **39.23** | 34.78 | 60.83 | **1 shared model** |
-| **Multi-Horizon NegBin ($v4$, Single-Seed)** | Shared Trunk Probabilistic | 16.04 | 19.24 | 22.89 | 26.05 | 41.18 | 34.32 | 60.49 | **1 shared model** |
+| **Multi-Horizon NegBin ($v4$, Single-Seed)** | Shared Trunk Probabilistic | 16.04 | 19.24 | 22.89 | 26.05 | 41.18 | 35.06 | 61.61 | **1 shared model** |
 | **Multi-Horizon NegBin ($v4$, Ensemble)** | Shared Trunk Probabilistic | 15.74 | 18.90 | 22.54 | 25.65 | 40.59 | **34.01** | **60.70** | **1 shared model** |
-| **Multi-Horizon NegBin ($v3$, Level-Weighted)** | Shared Trunk Probabilistic | 16.33 | 19.49 | 22.72 | **25.41** | **40.53** | 39.45 | 65.50 | **1 shared model** |
+| **Multi-Horizon NegBin ($v3$, Level-Weighted Ens)** | Shared Trunk Probabilistic | 16.33 | 19.49 | 22.72 | 25.41 | 40.53 | 39.45 | 65.50 | **1 shared model** |
 
 ---
 
@@ -118,15 +118,15 @@ The table below compiles the benchmark models from `origin` alongside our Negati
 While `gru_v2_quantile_lw` demonstrates slightly lower aggregate MAE on calm, low-incidence test periods at longer lead times (24.58 vs 25.44 at $h=4$), the **Multi-Horizon Negative Binomial architecture provides critical advantages in real-world epidemiology**:
 
 ```
-                  CRITICAL PERFORMANCE COMPARISON AT $h=4$
+                  CRITICAL PERFORMANCE COMPARISON AT h=4 (ENSEMBLE)
 ┌──────────────────────────────────────┬────────────────────┬────────────────────┐
 │ Metric / Dimension                   │ gru_v2_quantile_lw │ Multi-Horizon NB2  │
 ├──────────────────────────────────────┼────────────────────┼────────────────────┤
-│ Outbreak Peak MAE ($h=4$)            │ 42.64 cases/week   │ 39.23 cases/week   │
-│ Outbreak Peak MAE Advantage          │ Reference          │ -3.41 cases/week   │
+│ Outbreak Peak MAE (h=4)              │ 42.25 cases/week   │ 39.23 cases/week   │
+│ Outbreak Peak MAE Advantage          │ Reference          │ -3.02 cases/week   │
 ├──────────────────────────────────────┼────────────────────┼────────────────────┤
-│ 2017 Epidemic Test MAE ($h=1$)       │ 36.86 cases/week   │ 34.78 cases/week   │
-│ 2017 Epidemic Test MAE ($h=4$)       │ 62.28 cases/week   │ 60.83 cases/week   │
+│ 2017 Epidemic Test MAE (h=1)         │ 36.61 cases/week   │ 34.01 cases/week   │
+│ 2017 Epidemic Test MAE (h=4)         │ 61.81 cases/week   │ 60.70 cases/week   │
 ├──────────────────────────────────────┼────────────────────┼────────────────────┤
 │ Architecture / Trunk Requirement     │ 4 separate models  │ 1 shared trunk     │
 │ Total Parameters                     │ ~32,000 params     │ 8,226 params       │
@@ -139,13 +139,13 @@ While `gru_v2_quantile_lw` demonstrates slightly lower aggregate MAE on calm, lo
 ```
 
 1. **Decisive Superiority on Outbreak Peaks (Peak MAE):**
-   Epidemiological models must accurately forecast sudden epidemic surges. At $h=4$, NegBin achieves **39.23 Peak MAE**, whereas `gru_v2_quantile_lw` suffers an error of **42.64** (+8.7% higher error). NegBin avoids the peak under-prediction that plagues quantile regression.
+   Epidemiological models must accurately forecast sudden epidemic surges. At $h=4$, NegBin achieves **39.23 Peak MAE** ($v3$ Ensemble), whereas `gru_v2_quantile_lw` suffers an error of **42.25** (+7.7% higher error). NegBin avoids the peak under-prediction that plagues quantile regression.
 2. **Dominance in the 2017 National Epidemic (Fold 1):**
-   During Sri Lanka's largest dengue crisis on record, NegBin beats `gru_v2_quantile_lw` across **all four horizons simultaneously**:
-   * $h=1$: **34.78** vs 36.86
-   * $h=2$: **44.54** vs 47.10
-   * $h=3$: **53.51** vs 56.96
-   * $h=4$: **60.83** vs 62.28
+   During Sri Lanka's largest dengue crisis on record, NegBin beats `gru_v2_quantile_lw` across **all four horizons simultaneously** (Ensemble comparison):
+   * $h=1$: **34.01** ($v4$) / **34.78** ($v3$) vs 36.61
+   * $h=2$: **42.69** ($v4$) / **44.54** ($v3$) vs 46.30
+   * $h=3$: **52.42** ($v4$) / **53.51** ($v3$) vs 56.50
+   * $h=4$: **60.70** ($v4$) / **60.83** ($v3$) vs 61.81
 3. **Statistical Confidence:**
    Paired significance testing against persistence yields $p = 0.0002$ ($***$) for NegBin across all 7 headline folds, whereas `gru_v2_quantile_lw` achieved marginal non-parametric significance ($p = 0.047$ to $p = 0.11$).
 4. **Parametric Public Health Utilities:**
@@ -196,7 +196,7 @@ To test whether incorporating the exact biological transmission lags of the deng
 | **Multi-Horizon NegBin $v4$ (Biological Transmission)** | **15.74** | **18.90** | **22.54** | 25.65 | **34.01** | **60.70** |
 
 * **Empirical Findings:**
-  1. **New All-Time Project Records on $h=1$ and $h=2$:** Multi-Horizon NegBin $v4$ establishes the lowest error achieved by any model across the entire project at $h=1$ (**15.74 MAE**, **24.57 Peak MAE**) and $h=2$ (**18.90 MAE**, **29.28 Peak MAE**).
+  1. **Substantial Gains on Early Horizons:** Multi-Horizon NegBin $v4$ establishes the lowest error among all Negative Binomial models at $h=1$ (**15.74 MAE**) and $h=2$ (**18.90 MAE**), while setting the new project-wide best on Peak MAE at $h=1$ (**24.57**) and $h=2$ (**29.28**).
   2. **Unmatched Performance on the 2017 Mega-Epidemic:** In the most extreme epidemic crisis in Sri Lankan history (Fold 1), $v4$ sets the lowest recorded error at all four horizons ($h=1$: **34.01**, $h=2$: **42.69**, $h=3$: **52.42**, $h=4$: **60.70**), beating `gru_v2_quantile_lw` by up to 4.08 cases/week.
   3. **Complementary Strengths:** $v4$ excels during rapid climate-driven transitions and early horizons, while $v3$ retains slightly better stability at $h=4$ on low-incidence years (25.44 vs 25.65).
 
