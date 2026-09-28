@@ -40,6 +40,7 @@ from src.models.multi_horizon import (
 )
 from src.models.negative_binomial import (
     NegBinGCNGRU,
+    compute_level_weights,
     compute_outbreak_probability,
     compute_prediction_intervals,
     masked_negative_binomial_loss,
@@ -65,6 +66,7 @@ DEFAULTS = {
     "seeds": 3,
     "variant": "v1",
     "backbone": "identity",  # "identity" (gru_only) or "contiguity" (gcn_gru)
+    "head": "parallel",      # "parallel" or "cumulative"
 }
 
 baseline_module = None
@@ -161,7 +163,11 @@ def train_shared_negbin(
         horizon=n_horizons,
         dropout=config["dropout"],
     )
-    model = NegBinGCNGRU(backbone=raw_backbone, horizon=n_horizons).to(device)
+    model = NegBinGCNGRU(
+        backbone=raw_backbone,
+        horizon=n_horizons,
+        cumulative=(config.get("head") == "cumulative"),
+    ).to(device)
 
     optimiser = torch.optim.Adam(
         model.parameters(),
@@ -187,11 +193,17 @@ def train_shared_negbin(
             optimiser.zero_grad()
 
             mu, alpha = model(x_train[batch], adjacency_tensor, anchor_train[batch])
+            weight = (
+                compute_level_weights(anchor_train[batch], mask_train[batch])
+                if config.get("weighted")
+                else None
+            )
             loss = masked_negative_binomial_loss(
                 mu,
                 alpha,
                 y_train[batch],
                 mask_train[batch],
+                weight=weight,
             )
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -200,11 +212,17 @@ def train_shared_negbin(
         model.eval()
         with torch.no_grad():
             mu_val, alpha_val = model(x_val, adjacency_tensor, anchor_val)
+            val_weight = (
+                compute_level_weights(anchor_val, mask_val)
+                if config.get("weighted")
+                else None
+            )
             val_loss = masked_negative_binomial_loss(
                 mu_val,
                 alpha_val,
                 y_val,
                 mask_val,
+                weight=val_weight,
             ).item()
 
         if val_loss < best_loss - 1e-5:
@@ -265,7 +283,7 @@ def run_experiment(
     rows: list[dict] = []
 
     for fold in folds:
-        print(f"\n--- Fold {fold['fold_id']} (Test Year {fold['test_year']}) ---")
+        print(f"\n--- Fold {fold['fold_id']} (Test Year {fold['test_year']}) ---", flush=True)
         arrays = build_multi_horizon_fold_arrays(
             tensors, months, fold, config["lookback"], horizons
         )
@@ -315,6 +333,11 @@ def run_experiment(
             seed_mu_preds.append(mu_np)
 
             # Evaluate per horizon
+            arm_name = (
+                f"negbin_{config.get('head', 'parallel')}"
+                if config.get("head") != "parallel"
+                else ("negbin_shared_lw" if config.get("weighted") else "negbin_shared")
+            )
             h_mae_strs = []
             for idx, h in enumerate(horizons):
                 scores = naive.evaluate(
@@ -323,7 +346,7 @@ def run_experiment(
                 h_mae_strs.append(f"h{h}={scores['mae']:.2f}")
                 rows.append(
                     {
-                        "arm": "negbin_shared",
+                        "arm": arm_name,
                         "backbone": config["backbone"],
                         "variant": config["variant"],
                         "horizon": h,
@@ -339,7 +362,8 @@ def run_experiment(
                 )
 
             print(
-                f"Seed {seed}: {', '.join(h_mae_strs)} ({dur:.1f}s, best epoch {info['best_epoch']})"
+                f"Seed {seed}: {', '.join(h_mae_strs)} ({dur:.1f}s, best epoch {info['best_epoch']})",
+                flush=True,
             )
 
         # Ensemble
@@ -353,7 +377,7 @@ def run_experiment(
                 ens_mae_strs.append(f"h{h}={ens_scores['mae']:.2f}")
                 rows.append(
                     {
-                        "arm": "negbin_shared",
+                        "arm": arm_name,
                         "backbone": config["backbone"],
                         "variant": config["variant"],
                         "horizon": h,
@@ -367,7 +391,7 @@ def run_experiment(
                         **ens_scores,
                     }
                 )
-            print(f"Ensemble: {', '.join(ens_mae_strs)}")
+            print(f"Ensemble: {', '.join(ens_mae_strs)}", flush=True)
 
     return pd.DataFrame(rows)
 
@@ -377,8 +401,10 @@ def main():
     parser.add_argument("--folds", type=int, nargs="+", default=None, help="Folds to train on")
     parser.add_argument("--seeds", type=int, default=DEFAULTS["seeds"], help="Number of seeds")
     parser.add_argument("--backbone", type=str, default=DEFAULTS["backbone"], choices=["identity", "contiguity"])
-    parser.add_argument("--variant", type=str, default=DEFAULTS["variant"], choices=["v0", "v1", "v2", "v3"])
+    parser.add_argument("--variant", type=str, default=DEFAULTS["variant"], choices=["v0", "v1", "v2", "v3", "v4"])
+    parser.add_argument("--head", type=str, default=DEFAULTS["head"], choices=["parallel", "cumulative"], help="Head type: parallel or cumulative")
     parser.add_argument("--horizons", type=int, nargs="+", default=list(DEFAULT_HORIZONS))
+    parser.add_argument("--weighted", action="store_true", help="Apply origin case-level weighting to loss")
     parser.add_argument("--epochs", type=int, default=DEFAULTS["max_epochs"])
     parser.add_argument("--patience", type=int, default=DEFAULTS["patience"])
     args = parser.parse_args()
@@ -392,6 +418,8 @@ def main():
     config["seeds"] = args.seeds
     config["backbone"] = args.backbone
     config["variant"] = args.variant
+    config["head"] = args.head
+    config["weighted"] = args.weighted
     config["max_epochs"] = args.epochs
     config["patience"] = args.patience
 
@@ -408,7 +436,8 @@ def main():
 
     metrics_df = run_experiment(selected_folds, config, horizons, device)
 
-    out_csv = RESULTS_DIR / f"multi_horizon_negbin_{config['backbone']}_{config['variant']}.csv"
+    suffix = f"_{config['head']}" if config.get("head") != "parallel" else ("_lw" if config.get("weighted") else "")
+    out_csv = RESULTS_DIR / f"multi_horizon_negbin_{config['backbone']}_{config['variant']}{suffix}.csv"
     metrics_df.to_csv(out_csv, index=False)
     print(f"\nSaved metrics to {out_csv}")
 
@@ -416,7 +445,7 @@ def main():
     headline_df = metrics_df[(metrics_df["headline"] == True) & (metrics_df["ensemble"] == False)]
     if not headline_df.empty:
         print("\nSummary over Headline Folds (Single-Seed Mean):")
-        for arm in ["persistence", "negbin_shared"]:
+        for arm in ["persistence", "negbin_shared", "negbin_shared_lw", "negbin_cumulative"]:
             arm_sub = headline_df[headline_df["arm"] == arm]
             if not arm_sub.empty:
                 print(f"[{arm}]")

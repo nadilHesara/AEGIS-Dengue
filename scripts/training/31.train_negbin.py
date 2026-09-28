@@ -37,6 +37,7 @@ if str(PROJECT_DIR) not in sys.path:
 
 from src.models.negative_binomial import (
     NegBinGCNGRU,
+    compute_level_weights,
     compute_outbreak_probability,
     compute_prediction_intervals,
     masked_negative_binomial_loss,
@@ -116,10 +117,10 @@ def train_one_negbin(
         n_features=x_train.shape[-1],
         hidden=config["hidden"],
         gcn_layers=config["gcn_layers"],
-        horizon=config["horizon"],
+        horizon=1,
         dropout=config["dropout"],
     )
-    model = NegBinGCNGRU(backbone=raw_backbone, horizon=config["horizon"]).to(device)
+    model = NegBinGCNGRU(backbone=raw_backbone, horizon=1).to(device)
 
     optimiser = torch.optim.Adam(
         model.parameters(),
@@ -145,11 +146,17 @@ def train_one_negbin(
             optimiser.zero_grad()
 
             mu, alpha = model(x_train[batch], adjacency_tensor, anchor_train[batch])
+            weight = (
+                compute_level_weights(anchor_train[batch], mask_train[batch])
+                if config.get("weighted")
+                else None
+            )
             loss = masked_negative_binomial_loss(
                 mu.squeeze(-1),
                 alpha.squeeze(-1),
                 y_train[batch],
                 mask_train[batch],
+                weight=weight,
             )
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -158,11 +165,17 @@ def train_one_negbin(
         model.eval()
         with torch.no_grad():
             mu_val, alpha_val = model(x_val, adjacency_tensor, anchor_val)
+            val_weight = (
+                compute_level_weights(anchor_val, mask_val)
+                if config.get("weighted")
+                else None
+            )
             val_loss = masked_negative_binomial_loss(
                 mu_val.squeeze(-1),
                 alpha_val.squeeze(-1),
                 y_val,
                 mask_val,
+                weight=val_weight,
             ).item()
 
         if val_loss < best_loss - 1e-5:
@@ -202,7 +215,7 @@ def run_experiment(
     prediction_records: list[pd.DataFrame] = []
 
     for fold in folds:
-        print(f"\n--- Fold {fold['fold_id']} (Test Year {fold['test_year']}) ---")
+        print(f"\n--- Fold {fold['fold_id']} (Test Year {fold['test_year']}) ---", flush=True)
         arrays = baseline_module.build_fold_arrays(
             tensors, months, fold, config["lookback"], config["horizon"]
         )
@@ -214,6 +227,28 @@ def run_experiment(
         mask = arrays["test"]["mask"].astype(np.int8)
         anchor_test = arrays["test"]["anchor"]
 
+        # Baseline persistence reference for this horizon
+        origin_cases = np.expm1(anchor_test)
+        pers_scores = naive.evaluate(origin_cases, target, mask, thresholds)
+        rows.append(
+            {
+                "arm": "persistence",
+                "backbone": "naive",
+                "variant": config["variant"],
+                "horizon": config["horizon"],
+                "fold_id": fold["fold_id"],
+                "test_year": fold["test_year"],
+                "covers_covid": fold["covers_covid"],
+                "headline": fold["headline"],
+                "seed": "fixed",
+                "best_epoch": 0,
+                "test_nll": float("nan"),
+                "ensemble": False,
+                **pers_scores,
+            }
+        )
+
+        arm_name = "negbin_lw" if config.get("weighted") else "negbin"
         seed_mu_preds = []
         seed_alpha_preds = []
 
@@ -250,14 +285,16 @@ def run_experiment(
             print(
                 f"Seed {seed}: Test MAE={scores['mae']:.2f}, "
                 f"Peak MAE={scores['peak_mae']:.2f}, NLL={test_nll:.2f} "
-                f"({dur:.1f}s, best epoch {info['best_epoch']})"
+                f"({dur:.1f}s, best epoch {info['best_epoch']})",
+                flush=True,
             )
 
             rows.append(
                 {
-                    "arm": "negbin",
+                    "arm": arm_name,
                     "backbone": config["backbone"],
                     "variant": config["variant"],
+                    "horizon": config["horizon"],
                     "fold_id": fold["fold_id"],
                     "test_year": fold["test_year"],
                     "covers_covid": fold["covers_covid"],
@@ -274,12 +311,13 @@ def run_experiment(
         if len(seed_mu_preds) > 1:
             ensemble_mu = np.mean(seed_mu_preds, axis=0)
             ens_scores = naive.evaluate(ensemble_mu, target, mask, thresholds)
-            print(f"Ensemble: Test MAE={ens_scores['mae']:.2f}, Peak MAE={ens_scores['peak_mae']:.2f}")
+            print(f"Ensemble: Test MAE={ens_scores['mae']:.2f}, Peak MAE={ens_scores['peak_mae']:.2f}", flush=True)
             rows.append(
                 {
-                    "arm": "negbin",
+                    "arm": arm_name,
                     "backbone": config["backbone"],
                     "variant": config["variant"],
+                    "horizon": config["horizon"],
                     "fold_id": fold["fold_id"],
                     "test_year": fold["test_year"],
                     "covers_covid": fold["covers_covid"],
@@ -301,8 +339,9 @@ def main():
     parser.add_argument("--folds", type=int, nargs="+", default=None, help="Folds to train on")
     parser.add_argument("--seeds", type=int, default=DEFAULTS["seeds"], help="Number of seeds")
     parser.add_argument("--backbone", type=str, default=DEFAULTS["backbone"], choices=["identity", "contiguity"])
-    parser.add_argument("--variant", type=str, default=DEFAULTS["variant"], choices=["v0", "v1", "v2", "v3"])
+    parser.add_argument("--variant", type=str, default=DEFAULTS["variant"], choices=["v0", "v1", "v2", "v3", "v4"])
     parser.add_argument("--horizon", type=int, default=DEFAULTS["horizon"])
+    parser.add_argument("--weighted", action="store_true", help="Apply origin case-level weighting to loss")
     parser.add_argument("--epochs", type=int, default=DEFAULTS["max_epochs"])
     parser.add_argument("--patience", type=int, default=DEFAULTS["patience"])
     args = parser.parse_args()
@@ -317,6 +356,7 @@ def main():
     config["backbone"] = args.backbone
     config["variant"] = args.variant
     config["horizon"] = args.horizon
+    config["weighted"] = args.weighted
     config["max_epochs"] = args.epochs
     config["patience"] = args.patience
 
@@ -331,18 +371,21 @@ def main():
 
     metrics_df, _ = run_experiment(selected_folds, config, device)
 
-    out_csv = RESULTS_DIR / f"negbin_metrics_{config['backbone']}_{config['variant']}_h{config['horizon']}.csv"
+    suffix = "_lw" if config.get("weighted") else ""
+    out_csv = RESULTS_DIR / f"negbin_metrics_{config['backbone']}_{config['variant']}_h{config['horizon']}{suffix}.csv"
     metrics_df.to_csv(out_csv, index=False)
     print(f"\nSaved metrics to {out_csv}")
 
     # Print summary table
     headline_df = metrics_df[(metrics_df["headline"] == True) & (metrics_df["ensemble"] == False)]
     if not headline_df.empty:
-        mean_mae = headline_df["mae"].mean()
-        mean_peak = headline_df["peak_mae"].mean()
-        print(f"\nSummary over Headline Folds (Single-Seed Mean):")
-        print(f"  MAE:      {mean_mae:.2f}")
-        print(f"  Peak MAE: {mean_peak:.2f}")
+        print("\nSummary over Headline Folds (Single-Seed Mean):")
+        for arm in ["persistence", "negbin", "negbin_lw"]:
+            arm_sub = headline_df[headline_df["arm"] == arm]
+            if not arm_sub.empty:
+                mean_mae = arm_sub["mae"].mean()
+                mean_peak = arm_sub["peak_mae"].mean()
+                print(f"  [{arm:<12}] MAE: {mean_mae:6.2f} | Peak MAE: {mean_peak:6.2f}")
 
 
 if __name__ == "__main__":
