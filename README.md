@@ -1,5 +1,63 @@
 # AEGIS-Dengue
 
+## Repository architecture
+
+AEGIS-Dengue is an AI-based early-warning research system for district-level
+dengue prediction in Sri Lanka. The repository separates reusable implementation
+from executable experiments:
+
+```text
+src/        how the system works: reusable data, graph, model, training, and evaluation code
+scripts/    actions to run: data/, features/, graph/, training/, evaluation/
+data/       raw, processed, and external information (not committed)
+models/     checkpoints, weights, and versioned model artefacts (not committed)
+results/    figures, tables, predictions, and reports (not committed)
+configs/    data, model, and training defaults
+docs/       methodology, architecture, and reproducible workflow knowledge
+```
+
+### Installation
+
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\pip install -r requirements-model.txt
+```
+
+Install a suitable PyTorch build separately as documented in the existing setup
+section below. Configuration defaults live in `configs/*.yaml`; the established
+research scripts retain their numbered filenames for reproducibility.
+
+### Standard workflow
+
+```powershell
+# Data preparation
+python scripts/data/0.load_dataset.py
+python scripts/data/1.dataset_validate.py
+python scripts/data/2.create_calendar.py
+python scripts/data/3.create_nodes.py
+python scripts/data/4.create_canonical_dengue.py
+python scripts/data/9.aggregate_climate_to_periods.py
+python scripts/data/10.create_master_panel.py
+
+# Features and graph
+python scripts/features/12.build_model_tensors.py
+python scripts/graph/13.build_adjacency.py
+python scripts/features/14.build_folds.py
+
+# Training, evaluation, and prediction outputs
+python scripts/training/16.train_gcn_gru.py --seeds 3
+python scripts/evaluation/15.evaluate_naive_baselines.py
+
+# Prediction from a saved GCN-GRU checkpoint and prepared .npy windows
+python scripts/inference/predict_dengue.py --checkpoint models/checkpoints/model.pt --inputs data/processed/input_windows.npy
+```
+
+Training writes experiment artefacts to `results/`; store durable checkpoints
+under `models/checkpoints/`. See [docs/workflow.md](docs/workflow.md) for the
+full development flow and [CONTRIBUTING.md](CONTRIBUTING.md) for repository and
+branching rules.
+
 District-level dengue forecasting for Sri Lanka: 25 districts, 1,012 weekly
 reporting periods (2006-12-23 to 2026-05-17), ERA5-Land/CHIRPS climate plus
 case history, a graph-convolution + GRU model over a district contiguity graph.
@@ -30,6 +88,7 @@ runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 | 8g. Layer normalisation before the prediction head                    | Done. **Not established on accuracy** — the headline gain is the 2017 fold and nothing else (±0.31 MAE over the other six). The real result is **24–51% lower seed variance at every horizon** — see §8g.          |
 | 8h. Climate ablation at h = 1–4 (three arms, shuffle control)         | Done. **At h=4 climate content is load-bearing**: a shuffle control holding capacity fixed costs +1.55 MAE (p=0.016) and +3.10 peak MAE, removing half of §8f's skill. Monotonic in the horizon — see §8h.          |
 | 9. Gated fusion, climate ablation at h=4                              | Dual graph **answered negatively** by §8e. Climate ablation **done** in §8h. See §9.                                                                                                                               |
+| 10. Negative Binomial likelihood (Component C)                        | **Done.** **Breaks the 1-week persistence barrier**: 15.85 MAE (single-seed) / **15.69 (ensemble)** vs persistence 16.42. Beats persistence on **all 7/7 headline folds**, on peak MAE (25.32 vs 26.61), and on 2017 (35.47 vs 36.08). See [docs/negative_binomial.md](docs/negative_binomial.md). |
 
 **The one-paragraph summary of where the model stands:** **at one week ahead, no
 configuration in this repository beats persistence** — five separate changes
@@ -1080,6 +1139,7 @@ were independently re-verified this session by rerunning the scripts twice
 
 ## Related documents
 
+- [`docs/new_findings_report.md`](docs/new_findings_report.md) — **Comprehensive report on post-paper innovations, multi-horizon results, and v3 spatial features**
 - [`docs/running_from_zero.md`](docs/running_from_zero.md) — full rebuild instructions
 - [`docs/baseline.md`](docs/baseline.md) — baseline architecture and full results
 - [`docs/improvements.md`](docs/improvements.md) — the objective-fix work
@@ -1090,6 +1150,7 @@ were independently re-verified this session by rerunning the scripts twice
 - [`docs/layer_norm.md`](docs/layer_norm.md) — LayerNorm before the head: an accuracy null and a seed-variance result
 - [`docs/climate_ablation.md`](docs/climate_ablation.md) — what causes the h=3–4 skill: the shuffle control that attributes it to climate
 - [`docs/model_tensors.md`](docs/model_tensors.md) — tensors, folds, adjacency
+- [`docs/negative_binomial.md`](docs/negative_binomial.md) — Negative Binomial probabilistic head: breaking the 1-week persistence barrier
 - [`docs/learnable_lags_results.md`](docs/learnable_lags_results.md) — Component A
 - [`docs/climate_dataset_schema.md`](docs/climate_dataset_schema.md) — ERA5 extraction spec
 - [`docs/reporting_calendar.md`](docs/reporting_calendar.md) — the chronological key

@@ -25,7 +25,7 @@ REAL_DATA_FILES = [
 
 spec = importlib.util.spec_from_file_location(
     "master_panel",
-    PROJECT_DIR / "scripts" / "10.create_master_panel.py",
+    PROJECT_DIR / "scripts" / "data" / "10.create_master_panel.py",
 )
 master = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(master)

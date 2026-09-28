@@ -21,7 +21,7 @@ RAW_PATH = PROJECT_DIR / "data" / "raw" / "srilanka_weekly_data.csv"
 def _load_validator():
     """Import the validator module, whose filename is not a valid identifier."""
 
-    module_path = PROJECT_DIR / "scripts" / "1.dataset_validate.py"
+    module_path = PROJECT_DIR / "scripts" / "data" / "1.dataset_validate.py"
 
     spec = importlib.util.spec_from_file_location(
         "dengue_validator", module_path

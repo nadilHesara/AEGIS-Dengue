@@ -1,0 +1,55 @@
+name: Continuous integration
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+# New commits supersede an in-progress check for the same branch/PR.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-model.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-model.txt
+
+      # The raw dengue source and boundary file are committed, while these
+      # small derived fixtures are intentionally ignored.
+      - name: Build test fixtures
+        run: |
+          python scripts/data/2.create_calendar.py
+          python scripts/data/3.create_nodes.py
+          python scripts/data/4.create_canonical_dengue.py
+
+      - name: Run test suite
+        run: python -m pytest tests -q

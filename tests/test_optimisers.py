@@ -47,7 +47,7 @@ def _load(name: str, filename: str):
     return module
 
 
-optimisers = _load("optimiser_module", "25.train_optimisers.py")
+optimisers = _load("optimiser_module", "training/25.train_optimisers.py")
 optimisers.load_modules()
 baseline = optimisers.baseline_module
 

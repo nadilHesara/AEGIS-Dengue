@@ -1,6 +1,20 @@
 .venv
-.venv-1
-data
+
+data/raw/chirps_chunks
+data/raw/era5_chunks
+data/processed/
+data/interim/
+
+!data/
+!data/raw/
+!data/raw/dengue/
+!data/raw/dengue/.gitkeep
+!data/raw/climate/
+!data/raw/climate/.gitkeep
+!data/raw/geographic/
+!data/raw/geographic/.gitkeep
+!data/external/
+!data/external/.gitkeep
 
 scripts/__pycache__
 
@@ -9,4 +23,42 @@ __pycache__/
 .pytest_cache/
 
 
-results/
+results/**/*.csv
+
+docs/short paper.tex
+!results/figures/
+!results/figures/.gitkeep
+!results/tables/
+!results/tables/.gitkeep
+!results/predictions/
+!results/predictions/.gitkeep
+!results/reports/
+!results/reports/.gitkeep
+!results/models/adjacency_report.md
+
+models/checkpoints/*
+!models/checkpoints/.gitkeep
+models/weights/*
+!models/weights/.gitkeep
+models/versions/*
+!models/versions/.gitkeep
+
+# Generated pipeline outputs. The "!data/" and "!results/" lines above re-include
+# those folders, so the generated files are ignored explicitly here. Files that are
+# already committed (dengue CSV, adjacency.npz, nodes.csv, ...) stay tracked.
+data/interim/*
+!data/interim/.gitkeep
+!data/interim/district_name_map.csv
+data/processed/*
+!data/processed/.gitkeep
+!data/processed/adjacency.npz
+!data/processed/nodes.csv
+data/raw/climate_daily_district.csv
+data/raw/open_meteo_cache/
+results/data_validation/
+results/models/*
+!results/models/adjacency_report.md
+results/benchmark/predictions/
+results/benchmark/selection/
+results/benchmark/onset/*.parquet
+results/benchmark/figures/

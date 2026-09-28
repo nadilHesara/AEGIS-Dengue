@@ -41,7 +41,7 @@ def _load(name: str, filename: str):
     return module
 
 
-tuning = _load("tuning_module", "24.tune_hyperparameters.py")
+tuning = _load("tuning_module", "training/24.tune_hyperparameters.py")
 tuning.load_modules()
 baseline = tuning.baseline_module
 

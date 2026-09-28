@@ -52,7 +52,7 @@ def _load(name: str, filename: str):
     return module
 
 
-ablation = _load("climate_ablation_module", "29.train_climate_ablation.py")
+ablation = _load("climate_ablation_module", "training/29.train_climate_ablation.py")
 ablation.load_modules()
 baseline = ablation.baseline_module
 

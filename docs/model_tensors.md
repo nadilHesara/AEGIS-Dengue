@@ -92,6 +92,15 @@ Decisions worth knowing:
   year. Both remain in the panel and are used to **stratify results** — see
   section 3.
 
+**v2 — v1 plus 2 outbreak-history columns.** `national_wave_rank` (this
+district's case count ranked against all 25 in the same period) and
+`trailing_52_cumulative_cases` (log1p of this district's own cases summed over
+the trailing 52 periods). Both causal by construction, neither needs a
+fold-fitted parameter. Motivation, the scaling bug in the first version and its
+fix, results and a direct leakage check on the real tensors are in
+[`docs/outbreak_history_features.md`](outbreak_history_features.md) — not
+repeated here.
+
 ### Why two variants
 
 The GRU already sees `L` periods of history, so it can in principle learn any
@@ -340,6 +349,8 @@ The baseline itself:
 - [`docs/climate_dataset_schema.md`](climate_dataset_schema.md) — stages 1 and 2
 - [`docs/reporting_calendar.md`](reporting_calendar.md) — why `period_id` is the
   only safe sort key
+- [`docs/outbreak_history_features.md`](outbreak_history_features.md) — the `v2`
+  variant: motivation, a scaling bug and its fix, results, leakage check
 - [`results/models/model_tensors_report.md`](../results/models/model_tensors_report.md)
 - [`results/models/adjacency_report.md`](../results/models/adjacency_report.md)
 - [`results/models/folds_report.md`](../results/models/folds_report.md)
