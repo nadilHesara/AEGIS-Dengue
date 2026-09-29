@@ -92,6 +92,21 @@ HISTORY_WINDOW = 52
 NATIONAL_WAVE_RANK = "national_wave_rank"
 TRAILING_CUMULATIVE_CASES = "trailing_52_cumulative_cases"
 
+NEIGHBOR_CASES_MEAN = "neighbor_cases_log1p_mean"
+NEIGHBOR_CASES_MAX = "neighbor_cases_log1p_max"
+NEIGHBOR_CASE_VELOCITY = "neighbor_case_velocity"
+NEIGHBOR_FEATURES = [NEIGHBOR_CASES_MEAN, NEIGHBOR_CASES_MAX, NEIGHBOR_CASE_VELOCITY]
+
+BIOLOGICAL_FEATURES = [
+    "rainfall_lag_3",
+    "rainfall_lag_4",
+    "rainfall_lag_5",
+    "temp_mean_lag_3",
+    "temp_mean_lag_4",
+    "relative_humidity_lag_4",
+    "thermal_suitability",
+]
+
 # Days in a mean tropical year, used for the seasonal angle. Not 365: the span
 # contains five leap years and day-of-year drifts against the season without it.
 DAYS_PER_YEAR = 365.25
@@ -364,6 +379,76 @@ def add_history_features(panel: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     return panel, [NATIONAL_WAVE_RANK, TRAILING_CUMULATIVE_CASES]
 
 
+def add_neighbor_features(
+    panel: pd.DataFrame,
+    adjacency_binary: np.ndarray,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Add causal spatial neighbor features using queen contiguity.
+
+    Computes for each district i and period t:
+    1. neighbor_cases_log1p_mean: Mean log1p(cases) of adjacent contiguous districts.
+    2. neighbor_cases_log1p_max: Maximum log1p(cases) among adjacent contiguous districts.
+    3. neighbor_case_velocity: Week-over-week change in neighbor mean case count.
+
+    These are strictly causal: they only access counts at period t and t-1,
+    providing regional wave awareness without blurring local signals.
+    """
+    panel = panel.copy()
+    c = panel.pivot(index="period_id", columns="node_id", values="cases").to_numpy()
+    log_c = np.log1p(c)
+    n_nodes = adjacency_binary.shape[0]
+
+    n_mean = np.stack(
+        [np.nanmean(log_c[:, np.where(adjacency_binary[i] == 1)[0]], axis=1) for i in range(n_nodes)],
+        axis=1,
+    )
+    n_max = np.stack(
+        [np.nanmax(log_c[:, np.where(adjacency_binary[i] == 1)[0]], axis=1) for i in range(n_nodes)],
+        axis=1,
+    )
+    n_vel = np.diff(n_mean, axis=0, prepend=np.nan)
+
+    panel[NEIGHBOR_CASES_MEAN] = n_mean.ravel()
+    panel[NEIGHBOR_CASES_MAX] = n_max.ravel()
+    panel[NEIGHBOR_CASE_VELOCITY] = n_vel.ravel()
+
+    return panel, list(NEIGHBOR_FEATURES)
+
+
+def add_biological_features(
+    panel: pd.DataFrame,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Add causal biological incubation and transmission dynamics features for v4.
+
+    1. Case dynamics:
+       - case_velocity_local: week-over-week difference in log1p cases (local growth rate).
+       - case_acceleration_local: week-over-week difference in velocity (epidemic inflection).
+    2. Mosquito development & EIP lags:
+       - rainfall_lag_3, lag_4, lag_5: precipitation 3-5 weeks prior (breeding pools).
+       - temp_mean_lag_3, lag_4: temperature 3-4 weeks prior (extrinsic incubation period).
+       - relative_humidity_lag_4: humidity 4 weeks prior (vector survival).
+    3. Thermal suitability:
+       - thermal_suitability: Gaussian response centered at optimal vector temperature (28°C).
+    """
+    panel = panel.copy()
+    grouped = panel.groupby("node_id")
+
+    panel["rainfall_lag_3"] = grouped["rainfall_daily_mean_mm"].shift(3)
+    panel["rainfall_lag_4"] = grouped["rainfall_daily_mean_mm"].shift(4)
+    panel["rainfall_lag_5"] = grouped["rainfall_daily_mean_mm"].shift(5)
+
+    panel["temp_mean_lag_3"] = grouped["temperature_mean_c"].shift(3)
+    panel["temp_mean_lag_4"] = grouped["temperature_mean_c"].shift(4)
+
+    panel["relative_humidity_lag_4"] = grouped["relative_humidity_mean"].shift(4)
+
+    t_opt = 28.0
+    t_std = 4.0
+    panel["thermal_suitability"] = np.exp(-0.5 * ((panel["temperature_mean_c"] - t_opt) / t_std) ** 2)
+
+    return panel, list(BIOLOGICAL_FEATURES)
+
+
 def feature_names_for(
     variant: str,
     rolling_names: list[str],
@@ -373,7 +458,7 @@ def feature_names_for(
 
     `history_names` defaults to `None` (treated as empty) so callers built
     before v2 existed -- asking only for "v0" or "v1" -- keep working
-    unchanged; only a "v2" request needs it supplied.
+    unchanged; only a "v2" or "v3" request needs it supplied.
     """
 
     if variant == "v0":
@@ -386,6 +471,22 @@ def feature_names_for(
         if not history_names:
             raise ValueError("variant 'v2' requires history_names.")
         return list(BASE_FEATURES) + rolling_names + list(history_names)
+
+    if variant == "v3":
+        if not history_names:
+            raise ValueError("variant 'v3' requires history_names.")
+        return list(BASE_FEATURES) + rolling_names + list(history_names) + list(NEIGHBOR_FEATURES)
+
+    if variant == "v4":
+        if not history_names:
+            raise ValueError("variant 'v4' requires history_names.")
+        return (
+            list(BASE_FEATURES)
+            + rolling_names
+            + list(history_names)
+            + list(NEIGHBOR_FEATURES)
+            + list(BIOLOGICAL_FEATURES)
+        )
 
     raise ValueError(f"Unknown variant {variant!r}.")
 
@@ -716,6 +817,9 @@ def main() -> int:
     panel = add_base_features(panel, nodes)
     panel, rolling_names = add_rolling_features(panel)
     panel, history_names = add_history_features(panel)
+    adjacency_binary = np.load(PROCESSED_DIR / "adjacency.npz", allow_pickle=True)["A_binary"]
+    panel, neighbor_names = add_neighbor_features(panel, adjacency_binary)
+    panel, biological_names = add_biological_features(panel)
 
     print(f"Panel rows:       {len(panel)}")
     print(f"Reporting periods:{panel['period_id'].nunique():>6}")
@@ -727,7 +831,7 @@ def main() -> int:
     summaries: dict[str, dict[str, object]] = {}
     built: dict[str, dict[str, np.ndarray]] = {}
 
-    for variant in ("v0", "v1", "v2"):
+    for variant in ("v0", "v1", "v2", "v3", "v4"):
         features = feature_names_for(variant, rolling_names, history_names)
         tensors = build_tensors(panel, features)
 
