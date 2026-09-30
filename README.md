@@ -49,6 +49,12 @@ python scripts/features/14.build_folds.py
 python scripts/training/16.train_gcn_gru.py --seeds 3
 python scripts/evaluation/15.evaluate_naive_baselines.py
 
+# Current model: multi-horizon Negative Binomial on the v3 tensor (§8i)
+python scripts/training/32.train_multi_horizon_negbin.py --variant v3 --seeds 3
+
+# Gradient-clipping ablation for the current model (§8j)
+python scripts/training/37.train_grad_clipping.py
+
 # Prediction from a saved GCN-GRU checkpoint and prepared .npy windows
 python scripts/inference/predict_dengue.py --checkpoint models/checkpoints/model.pt --inputs data/processed/input_windows.npy
 ```
@@ -64,8 +70,10 @@ case history, a graph-convolution + GRU model over a district contiguity graph.
 
 This file is the single entry point. Section-specific detail lives in
 `docs/`; this README states what is true right now, verified against the code
-and the committed results as of **2026-09-10** (§8c–§8f and their supporting
-runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
+and the committed results as of **2026-09-28** (§8i summarises the
+multi-horizon Negative Binomial model from `docs/new_findings_report.md`; §8j,
+gradient clipping, was run this date; §8c–§8h date from 2026-09-10; §6/§8 GPU
+numbers re-verified 2026-09-09).
 
 ---
 
@@ -89,6 +97,8 @@ runs added this date; §6/§8 GPU numbers re-verified 2026-09-09).
 | 8h. Climate ablation at h = 1–4 (three arms, shuffle control)         | Done. **At h=4 climate content is load-bearing**: a shuffle control holding capacity fixed costs +1.55 MAE (p=0.016) and +3.10 peak MAE, removing half of §8f's skill. Monotonic in the horizon — see §8h.          |
 | 9. Gated fusion, climate ablation at h=4                              | Dual graph **answered negatively** by §8e. Climate ablation **done** in §8h. See §9.                                                                                                                               |
 | 10. Negative Binomial likelihood (Component C)                        | **Done.** **Breaks the 1-week persistence barrier**: 15.85 MAE (single-seed) / **15.69 (ensemble)** vs persistence 16.42. Beats persistence on **all 7/7 headline folds**, on peak MAE (25.32 vs 26.61), and on 2017 (35.47 vs 36.08). See [docs/negative_binomial.md](docs/negative_binomial.md). |
+| 8i. Multi-horizon Negative Binomial (shared trunk, v3/v4 tensors) — **current model** | **Done.** One shared GRU trunk with four NB2 heads beats same-horizon persistence at **every** horizon h = 1–4 (ensemble 15.88 / 19.18 / 22.59 / 25.44 vs 16.42 / 20.16 / 24.58 / 28.47) and has the lowest h=4 peak MAE in the repository (39.23). See §8i. |
+| 8j. Gradient clipping (none / 0.25 / 1.0 / 5.0) on the current model | **Done. No exploding gradients** — largest pre-clip norm 2.87 in 84 runs, never >10× the run median. The committed 1.0 clip fires on 0.3% of steps, and no threshold moves MAE by more than 0.07 (p ≥ 0.38). `clip_0.25` lowers seed variance by 12–30%. See §8j. |
 
 **The one-paragraph summary of where the model stands:** **at one week ahead, no
 configuration in this repository beats persistence** — five separate changes
@@ -105,21 +115,39 @@ kept running into: at h=1 the previous week's case count carries nearly all the
 signal, so there is little left for anything else to add. Remove that crutch and
 the model has real skill.
 
+**Update (status-table row 10 and §8i).** The one-week barrier has since been
+broken by changing the *likelihood*, not the architecture: a Negative Binomial
+head anchored on the origin count beats persistence at h=1 (15.69–15.88 MAE vs
+16.42, 7/7 folds), and the multi-horizon version with one shared trunk beats it
+at every horizon from 1 to 4. That model — `scripts/training/32`, tensor `v3`,
+identity backbone, parallel heads — is the current model, and the one §8j's
+gradient-clipping ablation was run on.
+
 ---
 
 ## 2. Repository layout
 
 ```
-scripts/            numbered pipeline, run in order — see §5
+scripts/            numbered pipeline, grouped by stage — see §5
+  data/              0–11: load, validate, calendar, climate extraction, panel
+  features/          12.build_model_tensors.py (v0–v4), 14.build_folds.py
+  graph/             13.build_adjacency.py
+  training/          16 baseline … 29 climate ablation, then:
                      24.tune_hyperparameters.py — the 9-axis GCN+GRU search (§8c)
                      25.train_optimisers.py — Adam / AdamW / LR schedule (§8d)
                      26.train_graph_variants.py — four adjacencies vs identity (§8e)
                      27.train_multi_horizon.py — h = 1..4, separate and shared (§8f)
+                     31.train_negbin.py — Negative Binomial head at h=1 (status row 10)
+                     32.train_multi_horizon_negbin.py — the current model (§8i)
+                     37.train_grad_clipping.py — gradient-clipping ablation (§8j)
+  evaluation/        naive baselines, diagnostics, significance tests, figures
+  inference/         predict_dengue.py
 src/models/          lag_encoder.py — the learnable-lag module (Component A)
                      simplex_activations.py — alternative simplex maps for its
                      basis mixture (§8b)
                      adaptive_graph.py — the learnable adjacency (§8e)
                      multi_horizon.py — multi-horizon windowing and heads (§8f)
+                     negative_binomial.py — NB2 likelihood and anchored head (§8i)
 data/raw/             source CSVs (dengue, ERA5, CHIRPS, GADM polygons)
 data/interim/         calendar, canonical dengue, climate joined to periods
 data/processed/       panel, tensors, adjacency, folds — model-ready arrays
@@ -153,6 +181,9 @@ Read this README first. Go to a doc only for the depth on that topic.
 | [`docs/optimiser_scheduling.md`](docs/optimiser_scheduling.md)     | Adam vs AdamW vs AdamW+ReduceLROnPlateau: the hooks added to script 16, the three-arm sweep, and why the schedule fires after the kept model is already chosen                      | Yes — written this session against the 9-fold × 3-seed run on disk                                                                                                                                                                          |
 | [`docs/graph_representation.md`](docs/graph_representation.md)     | Four adjacencies against the identity control: contiguity, a Gaussian distance kernel, and a learned graph; what the learned one converged to and why it doesn't resemble geography | Yes — written this session against the 9-fold × 3-seed run on disk                                                                                                                                                                          |
 | [`docs/multi_horizon.md`](docs/multi_horizon.md)                   | h = 1–4, separate and shared models, persistence rescored per horizon, the significance tests, and why the effect is not the 2017 artefact                                          | Yes — written this session against the 9-fold × 3-seed run on disk                                                                                                                                                                          |
+| [`docs/negative_binomial.md`](docs/negative_binomial.md)           | The NB2 likelihood at h=1: why log-MSE was the wrong objective, the anchored head, 9-fold results                                                                                 | Yes                                                                                                                                                                                                                                         |
+| [`docs/new_findings_report.md`](docs/new_findings_report.md)       | Multi-horizon NegBin, the v3 (spatial neighbour) and v4 (biological lag) tensors, weighting and cumulative-head ablations, the cross-model benchmark                              | Yes — source of §8i                                                                                                                                                                                                                         |
+| [`docs/gradient_clipping.md`](docs/gradient_clipping.md)           | Gradient clipping on the current model: the `clip_max_norm` hook, the logged norm distribution, the skip-if-provably-identical design, results                                   | Yes — written this session against the 7-fold × 3-seed run on disk                                                                                                                                                                          |
 | [`docs/proposal_brief.md`](docs/proposal_brief.md)                 | Source material for a course proposal document, dated 2026-08-04                                                                                                                    | **Superseded.** Written before the full sweep; states fold-8-only numbers as "preliminary" and explicitly forbids citing a 9-fold result. That result now exists — see §6. Keep for the proposal-writing instructions, not for the numbers. |
 
 ---
@@ -167,7 +198,7 @@ python -m venv .venv
 
 **`requirements.txt` is incomplete in practice.** A venv built from it was
 missing `pyarrow`, `scipy`, `matplotlib` and torch this session, despite the
-first three being pinned in the file. If `scripts/12.build_model_tensors.py`
+first three being pinned in the file. If `scripts/features/12.build_model_tensors.py`
 fails with "Unable to find a usable engine", or tests fail with
 `ModuleNotFoundError`, install directly:
 
@@ -230,25 +261,32 @@ built environment with the raw CSVs already present:
 
 ```powershell
 $py = ".venv\Scripts\python.exe"
-& $py scripts\2.create_calendar.py
-& $py scripts\4.create_canonical_dengue.py
-& $py scripts\9.aggregate_climate_to_periods.py
-& $py scripts\10.create_master_panel.py
-& $py scripts\12.build_model_tensors.py
-& $py scripts\13.build_adjacency.py
-& $py scripts\14.build_folds.py
-& $py scripts\15.evaluate_naive_baselines.py
-& $py scripts\16.train_gcn_gru.py --seeds 3
-& $py scripts\17.lag_correlation_scan.py
-& $py scripts\20.train_improved.py --seeds 3
-& $py scripts\24.tune_hyperparameters.py --n-trials 50
-& $py scripts\25.train_optimisers.py --seeds 3
+& $py scripts\data\2.create_calendar.py
+& $py scripts\data\4.create_canonical_dengue.py
+& $py scripts\data\9.aggregate_climate_to_periods.py
+& $py scripts\data\10.create_master_panel.py
+& $py scripts\features\12.build_model_tensors.py
+& $py scripts\graph\13.build_adjacency.py
+& $py scripts\features\14.build_folds.py
+& $py scripts\evaluation\15.evaluate_naive_baselines.py
+& $py scripts\training\16.train_gcn_gru.py --seeds 3
+& $py scripts\evaluation\17.lag_correlation_scan.py
+& $py scripts\training\20.train_improved.py --seeds 3
+& $py scripts\training\24.tune_hyperparameters.py --n-trials 50
+& $py scripts\training\25.train_optimisers.py --seeds 3
+& $py scripts\training\32.train_multi_horizon_negbin.py --variant v3 --seeds 3
+& $py scripts\training\37.train_grad_clipping.py
 ```
+
+Script 12 writes all five tensor variants (`v0`–`v4`); the current model needs
+`model_tensors_v3.npz`, so rerun it if only `v0`/`v1` are present.
 
 About 90 minutes for the pipeline through script 20, almost all of it in the two
 training sweeps; script 24's search adds roughly another 75 minutes for 50
 trials on GPU, script 25's three-arm sweep about 2 minutes, and script 26's
-four-graph sweep about 6, and script 27's multi-horizon sweep about 7. Add
+four-graph sweep about 6, and script 27's multi-horizon sweep about 7. On a
+12-thread CPU (no GPU), script 32 takes about a minute per fold × seed and
+script 37's default clipping sweep about 29 minutes (§8j). Add
 `18.train_lag_gcn_gru.py --seeds 1 --no-control` then `19.lag_demo.py` for the
 learnable-lag component (Component A).
 
@@ -256,13 +294,15 @@ For a smoke test rather than a full sweep, both training scripts accept
 `--folds` and `--seeds`:
 
 ```powershell
-& $py scripts\16.train_gcn_gru.py --variants v1 --folds 8 --seeds 1
-& $py scripts\20.train_improved.py --folds 8 --seeds 1
-& $py scripts\24.tune_hyperparameters.py --tune-folds 8 --n-trials 5 --trial-seeds 1 --final-seeds 1
-& $py scripts\25.train_optimisers.py --folds 8 --seeds 1
+& $py scripts\training\16.train_gcn_gru.py --variants v1 --folds 8 --seeds 1
+& $py scripts\training\20.train_improved.py --folds 8 --seeds 1
+& $py scripts\training\24.tune_hyperparameters.py --tune-folds 8 --n-trials 5 --trial-seeds 1 --final-seeds 1
+& $py scripts\training\25.train_optimisers.py --folds 8 --seeds 1
+& $py scripts\training\32.train_multi_horizon_negbin.py --variant v3 --folds 8 --seeds 1
+& $py scripts\training\37.train_grad_clipping.py --quick
 ```
 
-Roughly a minute each.
+Roughly a minute each; `--quick` for script 37 is about three.
 
 **Tests:**
 
@@ -1022,6 +1062,111 @@ Full write-up: [`docs/climate_ablation.md`](docs/climate_ablation.md).
 
 ---
 
+## 8i. Multi-horizon Negative Binomial — the current model
+
+**What it is** (`scripts/training/32.train_multi_horizon_negbin.py`,
+`src/models/negative_binomial.py`). §8f's shared-trunk multi-horizon design with
+the log-MSE objective replaced by a Negative Binomial (NB2) likelihood on raw
+counts. One 2-layer GRU (hidden 32) reads 12-week windows; four parallel heads
+output `(μ, α)` for h = 1–4. The mean is anchored on the origin count,
+`μ = (1 + y_origin) · exp(Δ)`, with the Δ head zero-initialised, so training
+starts exactly at persistence. Identity backbone (no graph, per §8e), 8,226
+parameters, trained on CPU in about a minute per fold × seed.
+
+**The v3 tensor** adds three explicit spatial channels in place of a graph:
+mean and max `log1p` cases over queen-contiguous neighbours, and the
+week-over-week change in the neighbour mean. **v4** adds biologically timed
+climate lags (rainfall 3–5 weeks, temperature 3–4, humidity 4) and a thermal
+suitability index centred on 28 °C.
+
+Headline folds, 9-fold × 3-seed sweeps (from
+[`docs/new_findings_report.md`](docs/new_findings_report.md)):
+
+| Model | h=1 | h=2 | h=3 | h=4 | h=4 peak MAE | 2017, h=1 | 2017, h=4 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Persistence | 16.42 | 20.16 | 24.58 | 28.47 | 47.98 | 36.08 | 75.73 |
+| `gru_v2_quantile_lw` (ensemble) | **15.58** | **18.78** | **22.20** | **24.33** | 42.25 | 36.61 | 61.81 |
+| NegBin v3 (single seed) | 16.09 | 19.44 | 22.91 | 25.85 | 39.92 | 35.19 | 61.55 |
+| **NegBin v3 (ensemble)** | 15.88 | 19.18 | 22.59 | 25.44 | **39.23** | 34.78 | 60.83 |
+| NegBin v4 (ensemble) | 15.74 | 18.90 | 22.54 | 25.65 | 40.59 | **34.01** | **60.70** |
+
+- **Beats persistence at every horizon**, including h=1 where §6–§8e never
+  could: paired t = −8.25, p = 0.0002, 7 of 7 folds.
+- **Lowest peak MAE and lowest 2017 error in the repository.** The level-weighted
+  quantile GRU is ahead on overall MAE at h ≥ 2 but needs 12 separate models; the
+  NegBin model is one shared trunk and gives a full predictive distribution, so
+  `P(Y ≥ T)` for an alert threshold is closed-form.
+- **Ablations that did not help:** level-weighting the NLL (worse on 2017:
+  h=1 39.45 vs 34.78) and a cumulative trajectory head (h=4 25.88 vs 25.44). The
+  count likelihood already scales the gradient with epidemic intensity, so the
+  §8 reweighting double-counts it.
+
+Run: `python scripts/training/32.train_multi_horizon_negbin.py --variant v3 --seeds 3`
+(add `--variant v4`, `--weighted` or `--head cumulative` for the ablations).
+Script 32 now also takes `--clip-max-norm` (default `1.0`, its committed value;
+`none` disables clipping) — see §8j.
+
+---
+
+## 8j. Gradient clipping on the current model — no exploding gradients, and the clip is inert
+
+**The question.** Script 32 always clipped the global gradient norm at 1.0,
+but nothing had ever been run without the clip or logged how large the
+gradients were. Is the clip preventing explosions, acting as a hidden
+learning-rate cut, or doing nothing?
+
+**The setup** (`scripts/training/37.train_grad_clipping.py`). Script 32 gained
+a `clip_max_norm` hook (default `1.0`; `None` disables) and now logs the
+**pre-clip** global norm of every optimiser step. There are four arms on the
+§8i model (v3, identity, h = 1–4): `no_clip`, `clip_0.25` (near the median
+norm, so it binds), `clip_1` (committed) and `clip_5`. The sweep covers the 7
+headline folds × 3 seeds, with identical data, batch order and initialisation
+within each (fold, seed).
+
+**Keeping the run short.** The control trains first. If its largest step norm
+is below a threshold, the clipped run is bit-identical (the clip factor is
+exactly 1 on every step, which a test checks), so it is copied rather than
+retrained. Jobs run in 6 processes × 2 threads, which is faster than PyTorch's
+default thread count for an 8k-parameter model. 51 of 84 runs were trained, in
+**28.7 min** on a 12-thread CPU (against ~47 min without the skip and ~1.5 h
+serially).
+
+**Gradient norms (21 control runs, every step):** median 0.25, p99 0.66,
+largest 2.87 (fold 7). **No step ever exceeded 10× its run's median, and
+nothing went non-finite.** Norms rise smoothly from ~0.12 to ~0.35 as the
+zero-initialised head leaves persistence. The 1.0 clip fires on 0.3% of steps,
+and 5.0 never fires.
+
+| h | `no_clip` | `clip_0.25` | `clip_1` | `clip_5` | persistence |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 16.00 | 16.04 (p 0.75) | 16.00 (p 0.73) | 16.00 | 16.42 |
+| 2 | 19.35 | 19.31 (p 0.74) | 19.36 (p 0.53) | 19.35 | 20.23 |
+| 3 | 22.84 | 22.77 (p 0.62) | 22.86 (p 0.48) | 22.84 | 24.81 |
+| 4 | 25.78 | 25.74 (p 0.81) | 25.81 (p 0.38) | 25.78 | 28.78 |
+
+- **No threshold changes accuracy.** `clip_5` is identical to `no_clip`.
+  `clip_1` is within 0.03 MAE of it at every horizon. `clip_0.25` clips 51% of
+  steps and still moves nothing by more than 0.07, with p ≥ 0.62.
+- **Epoch-to-epoch smoothness is unchanged** (validation loss rises on 43% of
+  epochs in every arm, with the same median jitter). **The one consistent
+  difference is seed variance:** `clip_0.25` lowers the mean per-fold seed sd
+  by 12–30% at every horizon. That is a lead on 3 seeds, not a finding, and
+  similar in kind to §8g.
+- **`clip_0.25` reverses the usual fold pattern.** It is worse on 2017 (+0.46
+  to +0.76) and slightly better on the other six folds (−0.08 to −0.17). Tight
+  clipping costs where large corrective gradients are legitimate. Neither half
+  is significant.
+
+**Verdict:** there are no exploding gradients to prevent. Keep `1.0` as cheap
+insurance for future changes that might produce spikes, and don't adopt a
+tighter clip on this evidence. This is consistent with §8c–§8g: optimisation
+is not what limits the model.
+
+Full write-up: [`docs/gradient_clipping.md`](docs/gradient_clipping.md).
+Figure: `results/figures/grad_clipping_norms.png`.
+
+---
+
 ## 9. What the evidence says to do next
 
 Ordered by what §6–8f actually established. Two directions are closed and one has
@@ -1049,16 +1194,14 @@ is mostly the horizon.
 2. **Fix lag kernels to the §7 measured delays instead of learning them
    end-to-end**, paired with (1). Decouples the delay estimate from a gradient
    that provably doesn't carry it.
-3. **A count likelihood** (negative binomial or Tweedie) instead of Gaussian-
-   in-log-space. §8's reweighting is a partial, hand-built approximation to
-   what a proper count model would do natively.
+3. ~~**A count likelihood** (negative binomial or Tweedie) instead of Gaussian-
+   in-log-space.~~ **Done** — status-table row 10 and §8i. The NB2 head is now
+   the current model.
 4. **Quantile forecasts** at τ ∈ {0.1, 0.5, 0.9} for operational use — the
    pinball loss from §8 already exists; extending it to a real interval is a
    small step. §8f raises the priority: a horizon at which the model actually
    has skill is a horizon at which a calibrated interval is worth publishing.
-5. **A count likelihood** (negative binomial or Tweedie) instead of Gaussian-
-   in-log-space. §8's reweighting is a partial, hand-built approximation to
-   what a proper count model would do natively.
+5. *(Duplicate of item 3 — done.)*
 6. **Gated spatial/temporal fusion** (`src/models/gated_fusion.py` exists and is
    unrun at full sweep). §8e weakens the case: the gate chooses per district
    between a graph branch and an identity branch, and §8e found no graph worth
@@ -1094,10 +1237,14 @@ actually checked this session:
   `test_improved_losses.py` (24 tests, §8), `test_tuning.py` (14 tests, §8c),
   `test_optimisers.py` (16 tests, §8d), `test_graph_variants.py` (25 tests, §8e),
   `test_multi_horizon.py` (34 tests, §8f), `test_layer_norm.py` (21 tests,
-  §8g) and `test_climate_ablation.py` (27 tests, §8h) were added, one dependency-driven set of
+  §8g), `test_climate_ablation.py` (27 tests, §8h) and `test_grad_clipping.py`
+  (18 cases, §8j) were added, one dependency-driven set of
   failures was resolved by installing `scipy` and `matplotlib`, and the 3
   `test_lag_encoder.py` failures stopped once the CUDA torch install (§4) landed
-  on `2.11.0+cu128` instead of `2.14.0+cpu`.
+  on `2.11.0+cu128` instead of `2.14.0+cpu`. On the CPU-only `torch==2.13.0`
+  environment used for §8j (2026-09-28): 576 passed, 3 failed and
+  `test_adjacency.py` uncollectable, all from missing `tabulate` and
+  `geopandas` (same result with the §8j changes stashed).
 - **`scripts/16.train_gcn_gru.py` was modified for §8d.** `train_one` gained two
   optional hooks, `make_optimiser` and `make_scheduler`, and the hardcoded
   `torch.optim.Adam` moved into a `build_optimiser` function that is still the
@@ -1107,6 +1254,16 @@ actually checked this session:
   predictions, asserted by test on both synthetic and real fold data, and the
   full baseline sweep is unaffected. Any doc quoting script 16's optimiser as
   "hardcoded Adam" is describing the pre-§8d state.
+- **`scripts/training/32.train_multi_horizon_negbin.py` was modified for §8j.**
+  The hardcoded `nn.utils.clip_grad_norm_(model.parameters(), 1.0)` became
+  `clip_gradients(model, config["clip_max_norm"])`, with `DEFAULTS["clip_max_norm"]
+  = 1.0` and a `--clip-max-norm` flag (`none` disables). The pre-clip norm of
+  every step is now returned in `info["grad_norms"]`, and a per-epoch
+  `info["history"]` (train/val loss, norm mean/max, clipped fraction). **Behaviour
+  is unchanged at the default** — `tests/test_grad_clipping.py` asserts the
+  helper matches `clip_grad_norm_` bit-for-bit. Results can shift at the second
+  decimal with the torch thread count (e.g. fold 1 h=1 35.10 at 4 threads, 35.14
+  at 2), which is float reduction order, not the change.
 - `docs/learnable_lags.md` header still reads "Status: not started" — it's a
   workplan document frozen at the point work began; `learnable_lags_results.md`
   is the outcome doc and is current.
@@ -1149,6 +1306,7 @@ were independently re-verified this session by rerunning the scripts twice
 - [`docs/multi_horizon.md`](docs/multi_horizon.md) — h = 1–4, and the first result that beats persistence
 - [`docs/layer_norm.md`](docs/layer_norm.md) — LayerNorm before the head: an accuracy null and a seed-variance result
 - [`docs/climate_ablation.md`](docs/climate_ablation.md) — what causes the h=3–4 skill: the shuffle control that attributes it to climate
+- [`docs/gradient_clipping.md`](docs/gradient_clipping.md) — gradient clipping on the current model: norms, thresholds, stability
 - [`docs/model_tensors.md`](docs/model_tensors.md) — tensors, folds, adjacency
 - [`docs/negative_binomial.md`](docs/negative_binomial.md) — Negative Binomial probabilistic head: breaking the 1-week persistence barrier
 - [`docs/learnable_lags_results.md`](docs/learnable_lags_results.md) — Component A

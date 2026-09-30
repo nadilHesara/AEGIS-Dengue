@@ -67,6 +67,7 @@ DEFAULTS = {
     "variant": "v1",
     "backbone": "identity",  # "identity" (gru_only) or "contiguity" (gcn_gru)
     "head": "parallel",      # "parallel" or "cumulative"
+    "clip_max_norm": 1.0,    # global L2 gradient clip; None disables clipping
 }
 
 baseline_module = None
@@ -133,6 +134,18 @@ def build_multi_horizon_fold_arrays(
     return arrays
 
 
+def clip_gradients(model: nn.Module, max_norm: float | None) -> float:
+    """Clip the global gradient norm to ``max_norm`` and return the pre-clip norm.
+
+    ``max_norm=None`` leaves the gradients untouched but still measures them, so
+    an unclipped run logs the same quantity as a clipped one.
+    """
+    if max_norm is None:
+        grads = [p.grad for p in model.parameters() if p.grad is not None]
+        return float(nn.utils.get_total_norm(grads))
+    return float(nn.utils.clip_grad_norm_(model.parameters(), max_norm))
+
+
 def train_shared_negbin(
     arrays: dict[str, dict[str, np.ndarray]],
     adjacency: np.ndarray,
@@ -141,7 +154,11 @@ def train_shared_negbin(
     seed: int,
     device: torch.device,
 ) -> tuple[nn.Module, dict]:
-    """Train one shared-trunk multi-horizon Negative Binomial model."""
+    """Train one shared-trunk multi-horizon Negative Binomial model.
+
+    The returned info carries ``grad_norms`` (the pre-clip global norm of every
+    optimiser step) and ``history`` (one row per epoch) for stability analysis.
+    """
     torch.manual_seed(seed)
     np.random.seed(seed)
 
@@ -183,10 +200,16 @@ def train_shared_negbin(
     n_train = len(x_train)
     generator = torch.Generator().manual_seed(seed)
 
+    max_norm = config.get("clip_max_norm")
+    grad_norms: list[float] = []
+    history: list[dict] = []
+
     epoch = 0
     for epoch in range(1, config["max_epochs"] + 1):
         model.train()
         order = torch.randperm(n_train, generator=generator).to(device)
+        epoch_norms: list[float] = []
+        epoch_losses: list[float] = []
 
         for start in range(0, n_train, config["batch_size"]):
             batch = order[start : start + config["batch_size"]]
@@ -206,7 +229,8 @@ def train_shared_negbin(
                 weight=weight,
             )
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            epoch_norms.append(clip_gradients(model, max_norm))
+            epoch_losses.append(loss.item())
             optimiser.step()
 
         model.eval()
@@ -225,6 +249,22 @@ def train_shared_negbin(
                 weight=val_weight,
             ).item()
 
+        norms = np.asarray(epoch_norms)
+        grad_norms.extend(epoch_norms)
+        history.append(
+            {
+                "epoch": epoch,
+                "train_loss": float(np.mean(epoch_losses)),
+                "val_loss": val_loss,
+                "grad_norm_mean": float(norms.mean()),
+                "grad_norm_max": float(norms.max()),
+                "clipped_fraction": (
+                    float((norms > max_norm).mean()) if max_norm is not None else 0.0
+                ),
+                "nonfinite_steps": int((~np.isfinite(norms)).sum()),
+            }
+        )
+
         if val_loss < best_loss - 1e-5:
             best_loss, best_epoch, waited = val_loss, epoch, 0
             best_state = copy.deepcopy(model.state_dict())
@@ -238,6 +278,8 @@ def train_shared_negbin(
         "best_epoch": best_epoch,
         "epochs_run": epoch,
         "val_loss": best_loss,
+        "grad_norms": np.asarray(grad_norms),
+        "history": history,
     }
 
 
@@ -396,6 +438,16 @@ def run_experiment(
     return pd.DataFrame(rows)
 
 
+def parse_max_norm(value: str) -> float | None:
+    """Parse a clip threshold where 'none' means no clipping."""
+    if value.lower() == "none":
+        return None
+    max_norm = float(value)
+    if not max_norm > 0:
+        raise argparse.ArgumentTypeError("max norm must be positive or 'none'")
+    return max_norm
+
+
 def main():
     parser = argparse.ArgumentParser(description="Multi-Horizon Negative Binomial Forecaster.")
     parser.add_argument("--folds", type=int, nargs="+", default=None, help="Folds to train on")
@@ -407,6 +459,12 @@ def main():
     parser.add_argument("--weighted", action="store_true", help="Apply origin case-level weighting to loss")
     parser.add_argument("--epochs", type=int, default=DEFAULTS["max_epochs"])
     parser.add_argument("--patience", type=int, default=DEFAULTS["patience"])
+    parser.add_argument(
+        "--clip-max-norm",
+        type=parse_max_norm,
+        default=DEFAULTS["clip_max_norm"],
+        help="Global gradient-norm clip; 'none' disables clipping (default 1.0)",
+    )
     args = parser.parse_args()
 
     load_dependencies()
@@ -422,6 +480,7 @@ def main():
     config["weighted"] = args.weighted
     config["max_epochs"] = args.epochs
     config["patience"] = args.patience
+    config["clip_max_norm"] = args.clip_max_norm
 
     horizons = tuple(args.horizons)
 
