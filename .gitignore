@@ -66,3 +66,6 @@ results/benchmark/onset/*.parquet
 results/benchmark/onset_task/*.parquet
 results/benchmark/logs/
 results/benchmark/figures/
+
+results/climate_horizon/checkpoints/
+results/climate_horizon/predictions/
