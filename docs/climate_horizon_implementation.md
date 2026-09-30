@@ -1,5 +1,20 @@
 # Climate delays learned from informative horizons: implementation record
 
+
+> **Authoritative status (2026-09-30, after the correction).** This file
+> is an engineering log in chronological order. Where later sections
+> supersede earlier ones, the earlier text is kept and marked.
+>
+> - **Current routing (v2).** Weighted loss goes only to `encoder.*`
+>   (lag kernels) and `climate_gru.*`. Every prediction head, including
+>   `climate_delta`, receives the unweighted loss.
+> - **Superseded routing (v1).** §9 and §13 describe v1, where
+>   `climate_delta` was in the weighted group. That was an implementation
+>   error.
+> - **Current results:** [`climate_horizon_results.md`](climate_horizon_results.md).
+> - **Audit trail:** [`climate_horizon_correction_audit.md`](climate_horizon_correction_audit.md).
+>   The v1 results in §15–18 are history.
+
 Status: **frozen protocol fully executed (§17 retrospective, §18 2026 hold-out). Primary: no measurable difference.** New outputs go only to `results/climate_horizon/`. Nothing has been trained for this
 extension yet. Every number below comes from existing files on disk or from
 the short paper. Each one says which.
@@ -343,8 +358,10 @@ Per outer fold f, using **only periods ≤ `train_end_period`**:
    drives the sensitivity arm `hcd_informed_caseonly` only.
 4. **Weight rule (pre-registered, the same for either utility).**
    `w̃_h = max(g_h, 0)`. If every `g_h ≤ 0`, use w = [1,1,1,1]. Otherwise
-   `w_h = 0.95 · H · w̃_h / Σ_h w̃_h + 0.05`. The mean weight is exactly 1,
-   so the encoder's total gradient budget matches the baseline. Every
+   `w_h = 0.95 · H · w̃_h / Σ_h w̃_h + 0.05`. The mean weight is exactly 1.
+   *(Qualified 2026-09-30: a mean of one does **not** guarantee equal
+   gradient norms. The measured weights raised the raw encoder gradient
+   norm by 14.7%; see correction audit §11.)* Every
    horizon keeps at least 0.05.
 5. **No reuse of benchmark numbers.** The weights 0.77/1.05/1.07/1.11
    computed from `results/benchmark` shuffle costs in step 1 used test years.
@@ -467,9 +484,10 @@ extension yet.
 ## 7. Risks and open points
 
 - **The effect may be null.** Benchmark shuffle costs (test years;
-  illustration only, never used as weights) suggest the gains may be fairly
-  flat across h = 2–4. If the pilots agree, informed and uniform will be
-  close. That is a
+  illustration only, never used as weights) suggested that the gains might
+  be fairly flat. *(Outcome: the measured weights were **not** flat,
+  max/min 1.7–4.0, and the result was null anyway; see the results
+  document §5.)* That is a
   legitimate result. Report it with the mechanism diagnostics.
 - **Early folds.** Fold 1's inner blocks are 2013–2015 with training from
   2007. Probe gains may be ≤ 0, in which case the model falls back to
@@ -602,7 +620,8 @@ corrections combine in NB log-mean space:
   initialisation and the gate starts at 0.5.
 - **Router.** `_GradScale` on `delta_climate` (backward only), weights
   buffer `climate_weights`. Only [1,1,1,1] is used so far.
-- **Parameter groups.**
+- **Parameter groups.** *(Superseded: routing v1, an implementation
+  error. v2 excludes `climate_delta`; see §19.)*
   - `climate_parameters()`: the encoder, the climate GRU and
     `climate_delta`.
   - `other_parameters()`: the case trunk, case heads (delta and
@@ -922,7 +941,8 @@ horizon h's observed cells) and D_h (their count). It equals
     L_climate = Σ a_h w_h L_h / Σ a_h w_h
 
 - ∇L_climate goes only to `model.climate_parameters()` (lag encoder,
-  climate GRU, climate head). ∇L_equal goes to every other parameter
+  climate GRU, climate head *[v1; superseded: under v2 the climate head
+  receives ∇L_equal]*). ∇L_equal goes to every other parameter
   (case trunk, case heads, gate).
 - Both come from the same forward pass (`torch.autograd.grad` with
   `retain_graph`). Each gradient is assigned once. Global-norm clipping
@@ -1417,7 +1437,9 @@ Headline MAE (7 folds):
 - **COVID folds 4–5 (reported separately):** extension arms
   7.2/8.8/10.4/12.2 (B) against `nb_shared_v2` 6.70/8.06/9.54/10.79.
   The stored references do better in the COVID years.
-- **Calibration:** the extension arms' NB 95% intervals cover 0.93–0.96.
+- **Empirical 95% coverage** of the extension arms' NB intervals:
+  0.93–0.96. That is coverage at one nominal level, not a calibration
+  claim.
 
 Outputs: `results/climate_horizon/statistics/` (primary, secondary,
 exploratory, per-seed and per-fold metrics, WIS, coverage, seeds per
@@ -1508,3 +1530,37 @@ per-seed metrics, WIS, coverage) and `logs/*holdout*`.
 
 **Nothing is [PENDING] for the frozen protocol.** Any follow-up on arm C
 needs new data or a new declaration.
+
+
+---
+
+## 19. Correction: routing v2 (2026-09-30)
+
+§9 and §13 describe routing v1, which placed the climate correction head
+in the weighted group. That was an implementation error against the
+step-4 specification. It is fixed in routing v2: only the lag encoder and
+the climate GRU are weighted, and every prediction head is unweighted.
+
+Details, tests and the smoke check are in
+[`climate_horizon_correction_audit.md`](climate_horizon_correction_audit.md)
+§7. All §15–18 results were produced under v1. Corrected reruns are
+**[PENDING]**.
+
+
+---
+
+## 20. Consolidated final state (2026-09-30)
+
+For the current results and the reproduction commands, see
+[`climate_horizon_results.md`](climate_horizon_results.md) and the
+correction audit §9–11.
+
+**Documentation corrections made here:**
+- §9 and §13 are marked as routing v1.
+- The mean-one claim in §6.2 is qualified.
+- "Calibration" became "empirical coverage" (§17).
+- The "fairly flat weights" expectation in §7 is annotated with the
+  measured outcome.
+
+**Earlier versions of this file** are preserved in
+`results/climate_horizon/correction_2026-09-30/doc_snapshots/` and in git.

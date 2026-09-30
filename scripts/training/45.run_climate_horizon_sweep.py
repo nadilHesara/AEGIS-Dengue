@@ -36,6 +36,7 @@ from src.data.climate_horizon import (  # noqa: E402
 )
 from src.evaluation.climate_horizon import data_provenance  # noqa: E402
 from src.evaluation.long_horizon import build_benchmark_folds, load_pipeline, months_for  # noqa: E402
+from src.models.climate_horizon import ROUTING_VERSION  # noqa: E402
 from src.training import climate_horizon as tr  # noqa: E402
 from src.training import climate_horizon_arms as spec  # noqa: E402
 from src.training.climate_horizon_pilots import array_fingerprint  # noqa: E402
@@ -45,11 +46,17 @@ MANIFEST = PROJECT_DIR / "results" / "climate_horizon" / "run_manifest_2026-09-3
 MANIFEST_HASH = PROJECT_DIR / "results" / "climate_horizon" / "run_manifest_2026-09-30.sha256"
 CHECKPOINTS = PROJECT_DIR / "results" / "climate_horizon" / "checkpoints" / "sweep"
 
+# Routing-v2 correction (docs/climate_horizon_correction_audit.md): corrected runs
+# go to their own dated directory and are checked against the correction manifest.
+CORRECTION = PROJECT_DIR / "results" / "climate_horizon" / "correction_2026-09-30"
+CORRECTION_MANIFEST = CORRECTION / "correction_manifest.json"
+CORRECTION_HASH = CORRECTION / "correction_manifest.sha256"
 
-def check_manifest() -> str:
-    digest = hashlib.sha256(MANIFEST.read_bytes()).hexdigest()
-    if MANIFEST_HASH.read_text().split()[0] != digest:
-        raise SystemExit("run manifest changed since it was frozen")
+
+def check_manifest(path: Path = MANIFEST, hash_path: Path = MANIFEST_HASH) -> str:
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if hash_path.read_text().split()[0] != digest:
+        raise SystemExit(f"{path.name} changed since it was frozen")
     return digest
 
 
@@ -59,9 +66,20 @@ def main() -> int:
     parser.add_argument("--arms", nargs="+", default=list(spec.ARMS), choices=list(spec.ARMS))
     parser.add_argument("--holdout", action="store_true")
     parser.add_argument("--confirm-holdout", action="store_true")
+    parser.add_argument("--correction", action="store_true",
+                        help="routing-v2 reruns: write under correction_2026-09-30/, check the correction manifest")
     args = parser.parse_args()
 
-    manifest_sha = check_manifest()
+    global OUT, CHECKPOINTS
+    if args.correction:
+        manifest_sha = check_manifest(CORRECTION_MANIFEST, CORRECTION_HASH)
+        allowed = json.loads(CORRECTION_MANIFEST.read_text())["reruns"]
+        OUT, CHECKPOINTS = CORRECTION / "predictions", CORRECTION / "checkpoints" / "sweep"
+        for arm in args.arms:
+            if arm not in allowed:
+                raise SystemExit(f"{arm} is reused, not rerun, under the correction manifest")
+    else:
+        manifest_sha = check_manifest()
     if spec.HOLDOUT_FOLD in args.folds and not (args.holdout and args.confirm_holdout):
         raise SystemExit("fold 10 (2026) needs --holdout --confirm-holdout")
     if args.holdout and set(args.folds) != {spec.HOLDOUT_FOLD}:
@@ -118,6 +136,7 @@ def main() -> int:
                 frame.to_parquet(unit.with_suffix(".parquet"), index=False)
                 log = pd.DataFrame(info["gradient_log"])
                 meta = {"arm": arm, "fold_id": fold_id, "seed": seed, "weights": list(weights),
+                        "routing_version": ROUTING_VERSION, "correction_run": args.correction,
                         "weights_source": source, "config": config, "manifest_sha256": manifest_sha,
                         "split_fingerprints": split_fp, "best_epoch": info["best_epoch"],
                         "epochs_run": info["epochs_run"], "val_nll": info["val_loss"],

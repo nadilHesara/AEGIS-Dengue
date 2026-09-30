@@ -50,10 +50,14 @@ MARGIN = 0.30
 N_BOOT = 2000
 
 
+PREDICTION_ROOTS: dict[str, Path] = {}   # arm -> predictions root (set by --correction)
+
+
 def load_arms(folds: tuple[int, ...], arms) -> pd.DataFrame:
     frames = []
     for arm in arms:
-        paths = sorted((ROOT / "predictions" / arm).glob("fold*_seed*.parquet"))
+        root = PREDICTION_ROOTS.get(arm, ROOT / "predictions")
+        paths = sorted((root / arm).glob("fold*_seed*.parquet"))
         paths = [p for p in paths if int(p.stem.split("_")[0][4:]) in folds]
         frames += [pd.read_parquet(p) for p in paths]
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
@@ -118,7 +122,14 @@ def decide(tests: pd.DataFrame, boot: pd.DataFrame) -> pd.DataFrame:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--holdout", action="store_true")
+    parser.add_argument("--correction", action="store_true",
+                        help="use routing-v2 reruns for the rerun arms and reused v1 files for the rest")
     args = parser.parse_args()
+    correction_root = ROOT / "correction_2026-09-30"
+    if args.correction:
+        manifest = json.loads((correction_root / "correction_manifest.json").read_text())
+        for arm in manifest["reruns"]:
+            PREDICTION_ROOTS[arm] = correction_root / "predictions"
 
     baseline = load_pipeline()
     fm = baseline.folds_module
@@ -130,6 +141,8 @@ def main() -> int:
         folds, arms, out = (spec.HOLDOUT_FOLD,), spec.PRIMARY_ARMS, ROOT / "holdout_2026"
     else:
         folds, arms, out = spec.RETROSPECTIVE_FOLDS, tuple(spec.ARMS), ROOT / "statistics"
+    if args.correction:
+        out = correction_root / out.name
     out.mkdir(parents=True, exist_ok=True)
 
     ext = load_arms(folds, arms)

@@ -12,8 +12,8 @@ cell count. Over the active horizons (D_h > 0 in the batch):
     L_climate = sum_h a_h w_h L_h / sum_h a_h w_h
 
 The gradient of L_climate goes to the climate group
-(`model.climate_parameters()`: lag encoder, climate GRU, climate head). The
-gradient of L_equal goes to every other parameter. Each gradient is assigned
+(`model.climate_parameters()`: lag encoder and climate GRU; routing v2). The
+gradient of L_equal goes to every other parameter, including all prediction heads. Each gradient is assigned
 once. The optimiser's global-norm clipping (max 1.0, over all parameters,
 as in the baseline) is then applied, followed by one update.
 
@@ -81,6 +81,13 @@ def compute_gradients(model, batch: dict, weights: torch.Tensor, log_cosine: boo
 
     climate = list(model.climate_parameters())
     other = list(model.other_parameters())
+    if float(denominator.sum()) == 0:
+        # No observed target in the batch: no gradient for anyone, and `step`
+        # skips the optimiser so weight decay cannot move parameters on zeros.
+        return {"climate": climate, "climate_grads": None, "other": other, "other_grads": None,
+                "log": {"loss_equal": 0.0, "loss_climate": float("nan"), "climate_mass": 0.0,
+                        "raw_norm_climate": 0.0, "raw_norm_other": 0.0, "climate_skipped": True,
+                        "empty_batch": True}}
     climate_grads = None
     if climate and loss_climate is not None:
         climate_grads = torch.autograd.grad(loss_climate, climate, retain_graph=True, allow_unused=True)
@@ -120,6 +127,11 @@ def step(model, optimiser, batch: dict, weights: torch.Tensor, clip: float = 1.0
             continue
         for p, g in zip(params, grads):
             p.grad = None if g is None else g.detach().clone()
+    if result["other_grads"] is None and result["climate_grads"] is None:
+        log = result["log"]
+        log.update(raw_norm_total=0.0, clip_coefficient=1.0, clipped_norm_climate=0.0,
+                   clipped_norm_other=0.0, optimiser_step_skipped=True)
+        return log
     total = float(nn.utils.clip_grad_norm_(model.parameters(), clip))
     log = result["log"]
     log["raw_norm_total"] = total

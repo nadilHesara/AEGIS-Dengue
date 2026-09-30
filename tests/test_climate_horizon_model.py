@@ -113,12 +113,19 @@ def test_uniform_weights_equal_plain_summed_loss():
 
 
 def test_router_matches_two_pass_reference_and_leaves_other_groups_alone():
+    # Legacy backward-only router (superseded by src/training/climate_weighting.py
+    # and fixed at weight 1 in training). It scales the gradient at the climate
+    # head's output, so under routing v2 it also scales the head's own gradient;
+    # only the case branch, gate and dispersion are checked as untouched here.
     torch.manual_seed(0)
     m = model()
     weights = torch.tensor([0.0, 0.5, 1.5, 2.0])
     _, other_uniform, _ = _grads(m, [1, 1, 1, 1])
     climate, other, losses = _grads(m, weights)
-    for a, b in zip(other, other_uniform):
+    head = {id(p) for p in m.climate_delta.parameters()}
+    for p, a, b in zip(m.other_parameters(), other, other_uniform):
+        if id(p) in head:
+            continue
         assert (a is None and b is None) or torch.allclose(a, b, atol=1e-7)
 
     m.set_climate_weights([1, 1, 1, 1])

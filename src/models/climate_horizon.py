@@ -66,6 +66,11 @@ from src.models.lag_encoder import DEFAULT_LAG_REACH  # noqa: E402
 from src.models.stgnn import GCNGRU  # noqa: E402
 
 
+# Gradient-routing version recorded with every run. v1: climate head in the
+# weighted group (as run until 2026-09-30 18:44). v2: heads unweighted.
+ROUTING_VERSION = "v2-heads-unweighted"
+
+
 class _GradScale(torch.autograd.Function):
     """Identity forward; the gradient of column h is multiplied by weights[h]."""
 
@@ -155,13 +160,18 @@ class ClimateHorizonNB(nn.Module):
     # -- parameter groups ---------------------------------------------------
 
     def climate_parameters(self) -> list[nn.Parameter]:
-        """Group 1: climate encoder and climate-delay parameters."""
+        """Group 1 (weighted loss): the climate feature encoder -- lag kernels and climate GRU.
 
-        return [*self.encoder.parameters(), *self.climate_gru.parameters(),
-                *self.climate_delta.parameters()]
+        Routing v2 (correction 2026-09-30, docs/climate_horizon_correction_audit.md):
+        the climate correction head `climate_delta` is a prediction head and is
+        no longer in this group. No parameter is shared between the groups; the
+        encoder still receives its weighted gradient *through* the head.
+        """
+
+        return [*self.encoder.parameters(), *self.climate_gru.parameters()]
 
     def other_parameters(self) -> list[nn.Parameter]:
-        """Group 2: case GRU, gate and output heads."""
+        """Group 2 (unweighted loss): case branch, gate, every prediction head, dispersion."""
 
         climate = {id(p) for p in self.climate_parameters()}
         return [p for p in self.parameters() if id(p) not in climate]

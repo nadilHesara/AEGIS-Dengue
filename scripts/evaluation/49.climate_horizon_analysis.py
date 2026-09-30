@@ -46,6 +46,13 @@ from src.training import climate_horizon_arms as spec  # noqa: E402
 ROOT = PROJECT_DIR / "results" / "climate_horizon"
 OUT = ROOT / "analysis"
 TAB, FIG = OUT / "tables", OUT / "figures"
+CORR = ROOT / "correction_2026-09-30"
+ARM_ROOT: dict[str, Path] = {}      # arm -> results root for predictions and checkpoints (--correction)
+STATS = ROOT / "statistics"
+
+
+def arm_root(arm: str) -> Path:
+    return ARM_ROOT.get(arm, ROOT)
 B, D = "B_target_equal", "D_target_measured"
 LABELS = {"A_origin_equal": "A origin, equal", "B_target_equal": "B target, equal (baseline)",
           "C_origin_measured": "C origin, measured", "D_target_measured": "D target, measured (proposed)",
@@ -76,7 +83,7 @@ def savefig(fig, name):
 def load_extension(folds) -> pd.DataFrame:
     frames = []
     for arm in spec.ARMS:
-        for p in sorted((ROOT / "predictions" / arm).glob("fold*_seed*.parquet")):
+        for p in sorted((arm_root(arm) / "predictions" / arm).glob("fold*_seed*.parquet")):
             if int(p.stem.split("_")[0][4:]) in folds:
                 frames.append(pd.read_parquet(p))
     return pd.concat(frames, ignore_index=True)
@@ -123,8 +130,9 @@ def horizon_table(err: pd.DataFrame, folds, estimand: str) -> pd.DataFrame:
     per_fold = per_seed.groupby(["method", "fold_id", "horizon"])[["mae", "rmse", "peak_mae"]].mean().reset_index()
     head = per_fold.groupby(["method", "horizon"])[["mae", "rmse", "peak_mae"]].mean().reset_index()
     pers = head[head["method"] == "persistence"].set_index("horizon")
-    head["skill_mae"] = 1 - head["mae"] / head["horizon"].map(pers["mae"])
-    head["skill_peak"] = 1 - head["peak_mae"] / head["horizon"].map(pers["peak_mae"])
+    if len(pers):
+        head["skill_mae"] = 1 - head["mae"] / head["horizon"].map(pers["mae"])
+        head["skill_peak"] = 1 - head["peak_mae"] / head["horizon"].map(pers["peak_mae"])
     seeds = err.groupby("method")["seed"].nunique()
     head["seeds"] = head["method"].map(seeds)
     return head, per_fold
@@ -151,6 +159,18 @@ def paired_boot(err, a, b, folds, estimand) -> pd.DataFrame:
 
 
 def main() -> int:
+    import argparse
+
+    global OUT, TAB, FIG, STATS
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--correction", action="store_true",
+                        help="routing v2: rerun arms from correction_2026-09-30, output to correction_2026-09-30/analysis")
+    args = parser.parse_args()
+    if args.correction:
+        for arm in json.loads((CORR / "correction_manifest.json").read_text())["reruns"]:
+            ARM_ROOT[arm] = CORR
+        OUT = CORR / "analysis"
+        TAB, FIG, STATS = OUT / "tables", OUT / "figures", CORR / "statistics"
     for d in (TAB, FIG):
         d.mkdir(parents=True, exist_ok=True)
     baseline = load_pipeline()
@@ -195,7 +215,7 @@ def main() -> int:
     save(cov, "coverage", "Common scored cells per horizon (all methods and persistence scored on these).")
 
     # ---- 1. primary paired comparison
-    primary = pd.read_csv(ROOT / "statistics" / "primary_D_vs_B_headline7.csv")
+    primary = pd.read_csv(STATS / "primary_D_vs_B_headline7.csv")
     boots = pd.concat([paired_boot(err, D, B, spec.HEADLINE_FOLDS, "seed_mean"),
                        paired_boot(err, D, B, spec.HEADLINE_FOLDS, "ensemble"),
                        paired_boot(err, D, B, spec.RETROSPECTIVE_FOLDS, "seed_mean")], ignore_index=True)
@@ -239,8 +259,13 @@ def main() -> int:
          "2026 hold-out paired differences, 4-week block bootstrap.")
 
     # ---- 4. controls vs B
+    # Matched seeds: every arm (B included) restricted to the seed IDs all arms
+    # share, {0, 1, 2}, on the same cells. (Before 2026-09-30 21:00 this table
+    # compared B's 5 seeds with the other arms' 3.)
     rows = []
-    head, per_fold = horizon_table(err, spec.HEADLINE_FOLDS, "seed_mean")
+    shared = sorted(set.intersection(*[set(err[err.method == a].seed.unique()) for a in spec.ARMS]))
+    head, per_fold = horizon_table(err[err.method.isin(list(spec.ARMS)) & err.seed.isin(shared)],
+                                   spec.HEADLINE_FOLDS, "seed_mean")
     for arm in spec.ARMS:
         if arm == B:
             continue
@@ -252,10 +277,11 @@ def main() -> int:
     ctrl = pd.DataFrame(rows).pivot(index="arm", columns="horizon", values="delta_vs_B")
     ctrl.columns = [f"h{h}" for h in ctrl.columns]
     save(ctrl.reset_index(), "controls_vs_B", "Architecture and utility controls: headline MAE difference vs B "
-         "(negative = better). Exploratory; C, E--H use 3 seeds.")
+         f"(negative = better), matched seeds {shared} for every arm. Exploratory, unadjusted.")
 
     # ---- 5. compute
-    units = pd.DataFrame([json.loads(p.read_text()) for p in (ROOT / "predictions").glob("*/fold*_seed*.json")])
+    units = pd.DataFrame([json.loads(p.read_text()) for arm in spec.ARMS
+                          for p in (arm_root(arm) / "predictions" / arm).glob("fold*_seed*.json")])
     pil = pd.DataFrame([json.loads(p.read_text()) for p in (ROOT / "pilots").glob("fold*_block*_seed*.json")])
     comp = units.groupby("arm").agg(parameters=("parameters", "first"), fits=("seconds", "size"),
                                     mean_s=("seconds", "mean"), total_min=("seconds", lambda s: s.sum() / 60),
@@ -266,7 +292,7 @@ def main() -> int:
                                "total_min": pil["runtime_s"].map(lambda r: r["total_s"]).sum() / 60,
                                "peak_gpu_mb": np.nan, "best_epoch": np.nan}])
     save(pd.concat([comp, pilot_row], ignore_index=True), "compute",
-         "Compute cost on an RTX 4070 Laptop GPU (retrospective + hold-out fits; pilots listed separately).")
+         "Compute cost on an RTX 4070 Laptop GPU (retrospective + hold-out fits of the arms shown; pilots listed separately).")
 
     # ---- 6. weights and utilities
     wrows, urows = [], []
@@ -313,7 +339,7 @@ def main() -> int:
     device = torch.device("cpu")
     krows = []
     for arm in ("A_origin_equal", B, "C_origin_measured", D):
-        for p in sorted((ROOT / "checkpoints" / "sweep" / arm).glob("fold*_seed*.pt")):
+        for p in sorted((arm_root(arm) / "checkpoints" / "sweep" / arm).glob("fold*_seed*.pt")):
             fold = int(p.stem.split("_")[0][4:])
             if fold not in spec.RETROSPECTIVE_FOLDS:
                 continue
