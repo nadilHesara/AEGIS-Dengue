@@ -62,4 +62,6 @@ results/models/*
 results/benchmark/predictions/
 results/benchmark/selection/
 results/benchmark/onset/*.parquet
+results/benchmark/onset_task/*.parquet
+results/benchmark/logs/
 results/benchmark/figures/
