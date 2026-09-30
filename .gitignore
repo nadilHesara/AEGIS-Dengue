@@ -69,3 +69,9 @@ results/benchmark/figures/
 
 results/climate_horizon/checkpoints/
 results/climate_horizon/predictions/
+
+results/climate_horizon/*/
+!results/climate_horizon/analysis/
+!results/climate_horizon/statistics/
+!results/climate_horizon/holdout_2026/
+!results/climate_horizon/weights_final/
