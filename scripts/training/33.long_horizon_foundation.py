@@ -51,6 +51,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_DIR))
 
 from src.evaluation.long_horizon import (  # noqa: E402
+    BENCHMARK_DIR,
     HORIZONS,
     QUANTILES,
     build_benchmark_folds,
@@ -70,6 +71,8 @@ FINE_TUNED = {"chronos2_ft": "chronos2", "chronos2_joint_ft": "chronos2_joint"}
 FT_SETTINGS = {"finetune_mode": "lora", "learning_rate": 1e-5, "context_length": 512,
                "batch_size": 64}
 MODELS = {"chronos_bolt": "amazon/chronos-bolt-small"}
+CHECKPOINTS = {"chronos_bolt": "amazon/chronos-bolt-small"}  # every other arm: amazon/chronos-2
+COMPUTE_DIR = BENCHMARK_DIR / "compute"
 COVARIATES = ("rainfall_daily_mean_mm_roll4", "temperature_mean_c_roll4",
               "relative_humidity_mean_roll4")
 
@@ -139,13 +142,14 @@ def main() -> int:
     parser.add_argument("--horizons", nargs="*", type=int, default=list(HORIZONS))
     parser.add_argument("--ft-steps", type=int, default=1000)  # chosen on fold 0 val (2015): 1000 < zero-shot < 100 < 300
     parser.add_argument("--suffix", default="")
+    parser.add_argument("--no-holdout", action="store_true", help="Leave out fold 10 (2026).")
     arguments = parser.parse_args()
 
     from chronos import BaseChronosPipeline
 
     baseline = load_pipeline()
     folds_module = baseline.folds_module
-    folds = build_benchmark_folds(folds_module)
+    folds = build_benchmark_folds(folds_module, include_holdout=not arguments.no_holdout)
     if arguments.folds:
         folds = [f for f in folds if f["fold_id"] in arguments.folds]
     horizons = tuple(arguments.horizons)
@@ -171,19 +175,42 @@ def main() -> int:
     origins = np.arange(max(index_of[first], 52), index_of[last] + 1)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    COMPUTE_DIR.mkdir(parents=True, exist_ok=True)
+
+    def parameters(pipeline) -> int:
+        return int(sum(p.numel() for p in pipeline.model.parameters()))
+
+    def write_compute(arm, rows, wall):
+        frame = pd.DataFrame(rows)
+        frame["arm"] = arm
+        frame["checkpoint"] = CHECKPOINTS.get(arm, "amazon/chronos-2")
+        frame["hardware"] = torch.cuda.get_device_name(0) if device == "cuda" else "CPU"
+        frame["peak_gpu_mb"] = torch.cuda.max_memory_allocated() / 2**20 if device == "cuda" else np.nan
+        frame["arm_wall_seconds"] = wall
+        frame.to_csv(COMPUTE_DIR / f"{arm}{arguments.suffix}.csv", index=False)
+
     for arm in [a for a in arguments.arms if a in FINE_TUNED]:
         started = time.perf_counter()
+        if device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
         base = BaseChronosPipeline.from_pretrained("amazon/chronos-2", device_map=device,
                                                    torch_dtype=torch.float32)
-        frames = []
+        frames, compute = [], []
         for fold in folds:
+            fit_started = time.perf_counter()
             tuned = fine_tune(base, arm, log_cases, fold, index_of, arguments.ft_steps,
                               PROJECT_DIR / "models" / "checkpoints" / "chronos2_ft")
+            fit_seconds = time.perf_counter() - fit_started
             lo = index_of[int(fold["val_start_period"])] - max_h
             hi = index_of[int(fold["test_end_period"])] - 1
             fold_origins = np.arange(lo, hi + 1)
+            infer_started = time.perf_counter()
             forecasts = forecast_origins(tuned, FINE_TUNED[arm], log_cases, tensors["X"], names,
                                          season, fold_origins, max_h)
+            compute.append({"fold_id": fold["fold_id"], "train_seconds": fit_seconds,
+                            "ft_steps": arguments.ft_steps, "parameters": parameters(tuned),
+                            "inference_seconds": time.perf_counter() - infer_started,
+                            "origins": len(fold_origins)})
             forecasts = np.clip(np.expm1(np.sort(forecasts, axis=-1)), 0.0, None)
             position = {int(o): i for i, o in enumerate(fold_origins)}
             for split in ("val", "test"):
@@ -200,16 +227,22 @@ def main() -> int:
             del tuned
             torch.cuda.empty_cache()
         path = save_predictions(frames, arm + arguments.suffix)
+        write_compute(arm, compute, time.perf_counter() - started)
         print(f"{arm}: wrote {path.relative_to(PROJECT_DIR)} in "
               f"{time.perf_counter() - started:.0f}s", flush=True)
 
     for arm in [a for a in arguments.arms if a not in FINE_TUNED]:
         started = time.perf_counter()
+        if device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
         name = MODELS.get(arm, "amazon/chronos-2")
         pipeline = BaseChronosPipeline.from_pretrained(name, device_map=device,
                                                        torch_dtype=torch.float32)
+        infer_started = time.perf_counter()
         forecasts = forecast_origins(pipeline, arm, log_cases, tensors["X"], names,
                                      season, origins, max_h)
+        infer_seconds = time.perf_counter() - infer_started
+        n_parameters = parameters(pipeline)
         forecasts = np.clip(np.expm1(np.sort(forecasts, axis=-1)), 0.0, None)
         position = {int(o): i for i, o in enumerate(origins)}
 
@@ -226,6 +259,9 @@ def main() -> int:
                     frames.append(cell_frame(arm, fold, split, horizon, targets, median,
                                              -1, quantiles))
         path = save_predictions(frames, arm)
+        write_compute(arm, [{"fold_id": -1, "train_seconds": 0.0, "parameters": n_parameters,
+                             "inference_seconds": infer_seconds, "origins": len(origins)}],
+                      time.perf_counter() - started)
         print(f"{arm}: {len(origins)} origins, wrote {path.relative_to(PROJECT_DIR)} in "
               f"{time.perf_counter() - started:.0f}s", flush=True)
         del pipeline

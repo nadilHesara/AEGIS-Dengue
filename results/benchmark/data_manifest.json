@@ -1,0 +1,245 @@
+{
+  "written_utc": "2026-09-29T18:26:13+00:00",
+  "files": {
+    "dengue_raw": {
+      "path": "data/raw/srilanka_weekly_data.csv",
+      "sha256": "acfe5dfd3a3abae582139458734f2dfa16724eda7fad1dc32415c1fe737dae9d",
+      "bytes": 1067201,
+      "modified_utc": "2026-09-24T07:48:51+00:00"
+    },
+    "climate_daily": {
+      "path": "data/raw/climate_daily_district.csv",
+      "sha256": "68a5b35ce51a47a803bc247346c1c5d71d3bdf838c285a1cd080f2dcb1c5c9bd",
+      "bytes": 20024683,
+      "modified_utc": "2026-09-29T18:19:38+00:00"
+    },
+    "reporting_calendar": {
+      "path": "data/interim/reporting_calendar.csv",
+      "sha256": "a74b3aeb74e4e595f846b1ec7ea4a28ed444523adaf25a717dfe4624295407c9",
+      "bytes": 455565,
+      "modified_utc": "2026-09-29T17:07:15+00:00"
+    },
+    "dengue_canonical": {
+      "path": "data/interim/dengue_weekly_canonical.parquet",
+      "sha256": "41c794bea848d5811b6c7c064144e3065ebf54ed6e89f8cf69ace062efdcf8fb",
+      "bytes": 77534,
+      "modified_utc": "2026-09-29T17:07:17+00:00"
+    },
+    "nodes": {
+      "path": "data/processed/nodes.csv",
+      "sha256": "6c2a5ab4cafff3ad4e0c8355b11f5d7ff0f42f1c6468f9e4d91ab2902a4cc225",
+      "bytes": 2236,
+      "modified_utc": "2026-07-25T16:17:48+00:00"
+    },
+    "adjacency": {
+      "path": "data/processed/adjacency.npz",
+      "sha256": "54eed098e8f3516e0db54f6f4d235a3ee97c94fdfc2ea136a7f6bdcc6e0683f5",
+      "bytes": 5250,
+      "modified_utc": "2026-09-29T18:26:12+00:00"
+    },
+    "folds": {
+      "path": "data/processed/folds.json",
+      "sha256": "9aa94c12fe1b5a8071487daa8f4fd5057ddc4694b3940fedb8c468e4ddce2add",
+      "bytes": 3413,
+      "modified_utc": "2026-09-29T18:26:12+00:00"
+    },
+    "tensors_v0": {
+      "path": "data/processed/model_tensors_v0.npz",
+      "sha256": "20887219b84ab686b9b29219a7adeeeab6453f9d247256368a172a4e90bd1c0b",
+      "bytes": 571201,
+      "modified_utc": "2026-09-29T18:26:10+00:00"
+    },
+    "tensors_v1": {
+      "path": "data/processed/model_tensors_v1.npz",
+      "sha256": "faef014075772ad1d99527438c11c45ac3fd924acdf485163a9bd4ccdef5e1fb",
+      "bytes": 1269530,
+      "modified_utc": "2026-09-29T18:26:10+00:00"
+    },
+    "tensors_v2": {
+      "path": "data/processed/model_tensors_v2.npz",
+      "sha256": "b4ca92a3f892d396ea34c7284f9ec25749b1cfb7257250bbf29a428e53c14e3c",
+      "bytes": 1397470,
+      "modified_utc": "2026-09-29T18:26:11+00:00"
+    },
+    "tensors_v3": {
+      "path": "data/processed/model_tensors_v3.npz",
+      "sha256": "0ada0a877206ac1080adf38e5527f7e3d08f117a3b069ba1c5dac5f03e170eb9",
+      "bytes": 1643475,
+      "modified_utc": "2026-09-29T18:26:11+00:00"
+    },
+    "tensors_v4": {
+      "path": "data/processed/model_tensors_v4.npz",
+      "sha256": "d7166d716289d366eaa5f40ac0e3baf344c5c2be88f48e2de583c33216fc9d92",
+      "bytes": 2004030,
+      "modified_utc": "2026-09-29T18:26:11+00:00"
+    }
+  },
+  "climate": {
+    "data_source": [
+      "open-meteo:era5_seamless:centroid"
+    ],
+    "extraction_version": [
+      "open-meteo-v1"
+    ],
+    "api": "https://archive-api.open-meteo.com/v1/archive",
+    "model": "era5_seamless (ERA5-Land: temperature, dew point, humidity; ERA5: precipitation, wind)",
+    "spatial_support": "one point per district: the GADM 4.1 polygon centroid (nodes.csv)",
+    "day_boundary": "UTC",
+    "first_date": "2006-11-01",
+    "last_date": "2026-05-31",
+    "districts": 25,
+    "grid_points": [
+      {
+        "node_id": 0,
+        "grid_latitude": 7.2000046,
+        "grid_longitude": 81.5,
+        "fetched_utc": "2026-09-29T17:06:21+00:00"
+      },
+      {
+        "node_id": 1,
+        "grid_latitude": 8.400002,
+        "grid_longitude": 80.5,
+        "fetched_utc": "2026-09-29T17:06:30+00:00"
+      },
+      {
+        "node_id": 2,
+        "grid_latitude": 7.0999985,
+        "grid_longitude": 81.0,
+        "fetched_utc": "2026-09-29T17:07:09+00:00"
+      },
+      {
+        "node_id": 3,
+        "grid_latitude": 7.800003,
+        "grid_longitude": 81.5,
+        "fetched_utc": "2026-09-29T17:07:16+00:00"
+      },
+      {
+        "node_id": 4,
+        "grid_latitude": 6.9000015,
+        "grid_longitude": 80.0,
+        "fetched_utc": "2026-09-29T17:08:54+00:00"
+      },
+      {
+        "node_id": 5,
+        "grid_latitude": 6.2000046,
+        "grid_longitude": 80.30002,
+        "fetched_utc": "2026-09-29T17:09:01+00:00"
+      },
+      {
+        "node_id": 6,
+        "grid_latitude": 7.0999985,
+        "grid_longitude": 80.0,
+        "fetched_utc": "2026-09-29T17:09:07+00:00"
+      },
+      {
+        "node_id": 7,
+        "grid_latitude": 6.300003,
+        "grid_longitude": 81.100006,
+        "fetched_utc": "2026-09-29T17:09:14+00:00"
+      },
+      {
+        "node_id": 8,
+        "grid_latitude": 9.700005,
+        "grid_longitude": 80.100006,
+        "fetched_utc": "2026-09-29T17:10:57+00:00"
+      },
+      {
+        "node_id": 9,
+        "grid_latitude": 6.5999985,
+        "grid_longitude": 80.100006,
+        "fetched_utc": "2026-09-29T17:11:08+00:00"
+      },
+      {
+        "node_id": 10,
+        "grid_latitude": 7.300003,
+        "grid_longitude": 80.70001,
+        "fetched_utc": "2026-09-29T17:11:22+00:00"
+      },
+      {
+        "node_id": 11,
+        "grid_latitude": 7.0999985,
+        "grid_longitude": 80.30002,
+        "fetched_utc": "2026-09-29T17:12:12+00:00"
+      },
+      {
+        "node_id": 12,
+        "grid_latitude": 9.400002,
+        "grid_longitude": 80.30002,
+        "fetched_utc": "2026-09-29T17:12:31+00:00"
+      },
+      {
+        "node_id": 13,
+        "grid_latitude": 7.7000046,
+        "grid_longitude": 80.20001,
+        "fetched_utc": "2026-09-29T17:13:45+00:00"
+      },
+      {
+        "node_id": 14,
+        "grid_latitude": 8.900002,
+        "grid_longitude": 80.100006,
+        "fetched_utc": "2026-09-29T18:14:51+00:00"
+      },
+      {
+        "node_id": 15,
+        "grid_latitude": 7.7000046,
+        "grid_longitude": 80.70001,
+        "fetched_utc": "2026-09-29T18:14:58+00:00"
+      },
+      {
+        "node_id": 16,
+        "grid_latitude": 6.0999985,
+        "grid_longitude": 80.5,
+        "fetched_utc": "2026-09-29T18:15:05+00:00"
+      },
+      {
+        "node_id": 17,
+        "grid_latitude": 6.800003,
+        "grid_longitude": 81.30002,
+        "fetched_utc": "2026-09-29T18:15:12+00:00"
+      },
+      {
+        "node_id": 18,
+        "grid_latitude": 9.200005,
+        "grid_longitude": 80.5,
+        "fetched_utc": "2026-09-29T18:16:51+00:00"
+      },
+      {
+        "node_id": 19,
+        "grid_latitude": 7.0,
+        "grid_longitude": 80.70001,
+        "fetched_utc": "2026-09-29T18:16:57+00:00"
+      },
+      {
+        "node_id": 20,
+        "grid_latitude": 8.0,
+        "grid_longitude": 81.0,
+        "fetched_utc": "2026-09-29T18:17:04+00:00"
+      },
+      {
+        "node_id": 21,
+        "grid_latitude": 8.0,
+        "grid_longitude": 79.899994,
+        "fetched_utc": "2026-09-29T18:17:10+00:00"
+      },
+      {
+        "node_id": 22,
+        "grid_latitude": 6.5999985,
+        "grid_longitude": 80.600006,
+        "fetched_utc": "2026-09-29T18:18:49+00:00"
+      },
+      {
+        "node_id": 23,
+        "grid_latitude": 8.599998,
+        "grid_longitude": 81.100006,
+        "fetched_utc": "2026-09-29T18:18:56+00:00"
+      },
+      {
+        "node_id": 24,
+        "grid_latitude": 8.900002,
+        "grid_longitude": 80.5,
+        "fetched_utc": "2026-09-29T18:19:33+00:00"
+      }
+    ],
+    "availability_caveat": "Values are final reanalysis values retrieved in September 2026. Open-Meteo's historical API documents a delay before recent days are available, and ERA5 is revised from its preliminary ERA5T release; an operational system would have seen neither the final values nor the most recent days at each forecast origin. nb_shared_v2_wxlag1 tests a one-week delay; case-reporting delays are not modelled."
+  }
+}

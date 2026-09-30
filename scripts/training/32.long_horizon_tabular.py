@@ -37,6 +37,11 @@ Arms
     ridge_v2           linear ARX on the same features, alpha chosen on the
                        validation year. The linear counterpart; deterministic.
 
+lgbm_v2_climatology is lgbm_v2 with every climate channel replaced by each
+district's week-of-year climatology from the training years only (the control
+of scripts/31), so the tree family also separates observed weather from a
+seasonal calendar of weather.
+
 Output: results/benchmark/predictions/<arm>.parquet and, for the trees,
 results/benchmark/lgbm_importance.csv (gain by feature group and horizon).
 """
@@ -63,9 +68,14 @@ from src.evaluation.long_horizon import (  # noqa: E402
     months_for,
     save_predictions,
 )
-from src.models.climate_ablation import CLIMATE_FEATURES  # noqa: E402
+from src.models.climate_ablation import (  # noqa: E402
+    CLIMATE_FEATURES,
+    climate_indices,
+    climatology_climate,
+)
 
-ARMS = ("lgbm_v2", "lgbm_v2_noclimate", "ridge_v2")
+ARMS = ("lgbm_v2", "lgbm_v2_noclimate", "lgbm_v2_climatology", "ridge_v2")
+COMPUTE_DIR = BENCHMARK_DIR / "compute"
 MIN_ORIGIN = 24  # enough history for every lag below
 
 LGBM_PARAMS = {
@@ -243,7 +253,7 @@ def run(arms, folds, horizons, seeds):
     doy_angle = 2.0 * np.pi * doy / 365.25
 
     frames = {arm: [] for arm in arms}
-    importance = []
+    importance, compute = [], []
     for fold in folds:
         started = time.perf_counter()
         statistics = baseline.folds_module.fit_fold_statistics(
@@ -254,6 +264,18 @@ def run(arms, folds, horizons, seeds):
         fallback = np.nanmean(history, axis=0)
 
         cube, cube_labels = origin_features(scaled, names, neighbours, doy_angle)
+        clim_cube = None
+        if "lgbm_v2_climatology" in arms:
+            # Climate channels replaced by each district's week-of-year
+            # climatology from the training years only (the GRU control of
+            # scripts/31, applied before this fold's imputation and scaling).
+            clim_tensors = climatology_climate(tensors, climate_indices(names),
+                                               fold["train_end_period"])
+            clim_stats = baseline.folds_module.fit_fold_statistics(
+                clim_tensors, months, tensors["period_id"] <= fold["fit_end_period"])
+            clim_cube, _ = origin_features(
+                baseline.folds_module.transform(clim_tensors, months, clim_stats),
+                names, neighbours, doy_angle)
         line = []
         for horizon in horizons:
             rows = build_rows(tensors, cube, cube_labels, fold, horizon, doy_angle, fallback)
@@ -263,16 +285,24 @@ def run(arms, folds, horizons, seeds):
             for columns in (all_columns, no_climate):
                 _COLUMN_CACHE[tuple(columns)] = [labels.index(c) for c in columns]
 
+            clim_rows = (build_rows(tensors, clim_cube, cube_labels, fold, horizon, doy_angle, fallback)
+                         if clim_cube is not None else None)
             for arm in arms:
                 columns = no_climate if arm == "lgbm_v2_noclimate" else all_columns
+                arm_rows = clim_rows if arm == "lgbm_v2_climatology" else rows
                 if arm.startswith("lgbm"):
                     for seed in range(seeds):
-                        model = fit_lgbm(rows, columns, seed)
+                        fit_started = time.perf_counter()
+                        model = fit_lgbm(arm_rows, columns, seed)
+                        compute.append({"arm": arm, "fold_id": fold["fold_id"], "horizon": horizon,
+                                        "seed": seed, "train_seconds": time.perf_counter() - fit_started,
+                                        "best_iteration": model.best_iteration,
+                                        "train_rows": int(arm_rows["observed"][arm_rows["split"]["train"]].sum())})
                         for split in ("val", "test"):
-                            X, _ = flatten(rows, split, False)
+                            X, _ = flatten(arm_rows, split, False)
                             prediction, periods = to_cases(
-                                rows, split, model.predict(X[:, columns_index(columns)],
-                                                           num_iteration=model.best_iteration))
+                                arm_rows, split, model.predict(X[:, columns_index(columns)],
+                                                               num_iteration=model.best_iteration))
                             frames[arm].append(cell_frame(arm, fold, split, horizon, periods,
                                                           prediction, seed))
                         if seed == 0:
@@ -282,7 +312,10 @@ def run(arms, folds, horizons, seeds):
                                 "feature": columns, "gain": gain,
                                 "best_iteration": model.best_iteration}))
                 else:
+                    fit_started = time.perf_counter()
                     model, design = fit_ridge(rows, columns)
+                    compute.append({"arm": arm, "fold_id": fold["fold_id"], "horizon": horizon,
+                                    "seed": -1, "train_seconds": time.perf_counter() - fit_started})
                     for split in ("val", "test"):
                         X, _ = design(split, False)
                         prediction, periods = to_cases(rows, split, model.predict(X))
@@ -292,7 +325,7 @@ def run(arms, folds, horizons, seeds):
         print(f"  fold {fold['fold_id']} ({fold['test_year']}) {' '.join(line)} "
               f"{time.perf_counter() - started:5.1f}s", flush=True)
 
-    return frames, (pd.concat(importance, ignore_index=True) if importance else None)
+    return frames, (pd.concat(importance, ignore_index=True) if importance else None), compute
 
 
 def main() -> int:
@@ -302,15 +335,21 @@ def main() -> int:
     parser.add_argument("--folds", nargs="*", type=int, default=None)
     parser.add_argument("--horizons", nargs="*", type=int, default=list(HORIZONS))
     parser.add_argument("--seeds", type=int, default=3)
+    parser.add_argument("--no-holdout", action="store_true", help="Leave out fold 10 (2026).")
     arguments = parser.parse_args()
 
     baseline = load_pipeline()
-    folds = build_benchmark_folds(baseline.folds_module)
+    folds = build_benchmark_folds(baseline.folds_module, include_holdout=not arguments.no_holdout)
     if arguments.folds:
         folds = [f for f in folds if f["fold_id"] in arguments.folds]
 
     started = time.perf_counter()
-    frames, importance = run(arguments.arms, folds, tuple(arguments.horizons), arguments.seeds)
+    frames, importance, compute = run(arguments.arms, folds, tuple(arguments.horizons), arguments.seeds)
+    COMPUTE_DIR.mkdir(parents=True, exist_ok=True)
+    compute = pd.DataFrame(compute)
+    compute["hardware"] = "CPU (LightGBM default threads)"
+    for arm, group in compute.groupby("arm"):
+        group.to_csv(COMPUTE_DIR / f"{arm}.csv", index=False)
     for arm, arm_frames in frames.items():
         path = save_predictions(arm_frames, arm)
         print(f"{arm}: wrote {path.relative_to(PROJECT_DIR)}")

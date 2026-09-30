@@ -26,6 +26,8 @@ __pycache__/
 results/**/*.csv
 
 docs/short paper.tex
+docs/full paper.tex
+!results/
 !results/figures/
 !results/figures/.gitkeep
 !results/tables/
@@ -61,4 +63,6 @@ results/models/*
 results/benchmark/predictions/
 results/benchmark/selection/
 results/benchmark/onset/*.parquet
+results/benchmark/onset_task/*.parquet
+results/benchmark/logs/
 results/benchmark/figures/

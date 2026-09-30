@@ -1,5 +1,10 @@
 # Negative Binomial Probabilistic Head — Breaking the Horizon-1 Persistence Barrier
 
+> **Superseded (30 Sep 2026).** These numbers were measured outside the common-cell
+> benchmark (and, for the multi-horizon model, with windows split by their h=1 target).
+> The common-cell NB results are in `docs/revision_2026_09_30.md` and `docs/full paper.tex`.
+
+
 A standalone, principled count-likelihood implementation (Component C) that replaces
 log-space MSE with a Negative Binomial (NB2) maximum-likelihood objective, evaluated
 on the frozen 9-fold walk-forward benchmark.

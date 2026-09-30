@@ -10,8 +10,8 @@ and imputation can be fitted on the training split alone.
 
 | Variant | X | Features | Windows (L=12, h=1) |
 | --- | --- | --- | --- |
-| `v0` | 1012x25x14 | 14 | 987 of 1000 |
-| `v1` | 1012x25x23 | 23 | 976 of 1000 |
+| `v0` | 1012x25x14 | 14 | 988 of 1000 |
+| `v1` | 1012x25x23 | 23 | 977 of 1000 |
 | `v2` | 1012x25x25 | 25 | 936 of 1000 |
 | `v3` | 1012x25x28 | 28 | 936 of 1000 |
 | `v4` | 1012x25x35 | 35 | 936 of 1000 |
@@ -50,78 +50,57 @@ and imputation can be fitted on the training split alone.
 
 ### `v0`
 
-Total NaN cells: 526
+Total NaN cells: 1
 
 | Feature | NaN cells |
 | --- | --- |
 | `cases_log1p` | 1 |
-| `rainfall_daily_mean_mm` | 75 |
-| `rainy_days_frac` | 75 |
-| `temperature_mean_c` | 75 |
-| `diurnal_range_c` | 75 |
-| `dewpoint_mean_c` | 75 |
-| `relative_humidity_mean` | 75 |
-| `wind_speed_mean` | 75 |
 
-Usable target periods: 13 to 999
+Usable target periods: 13 to 1012
 
-Windows dropped for a NaN input: 13. For a target with no observed district: 0. Kept with a partly masked target: 1.
+Windows dropped for a NaN input: 12. For a target with no observed district: 0. Kept with a partly masked target: 1.
 
-Dropped target periods: 1000-1012
+Dropped target periods: 1000-1011
 
 ### `v1`
 
-Total NaN cells: 2776
+Total NaN cells: 1576
 
 | Feature | NaN cells |
 | --- | --- |
 | `cases_log1p` | 1 |
-| `rainfall_daily_mean_mm` | 75 |
-| `rainy_days_frac` | 75 |
-| `temperature_mean_c` | 75 |
-| `diurnal_range_c` | 75 |
-| `dewpoint_mean_c` | 75 |
-| `relative_humidity_mean` | 75 |
-| `wind_speed_mean` | 75 |
-| `rainfall_daily_mean_mm_roll4` | 150 |
-| `rainfall_daily_mean_mm_roll8` | 250 |
-| `rainfall_daily_mean_mm_roll12` | 350 |
-| `temperature_mean_c_roll4` | 150 |
-| `temperature_mean_c_roll8` | 250 |
-| `temperature_mean_c_roll12` | 350 |
-| `relative_humidity_mean_roll4` | 150 |
-| `relative_humidity_mean_roll8` | 250 |
-| `relative_humidity_mean_roll12` | 350 |
+| `rainfall_daily_mean_mm_roll4` | 75 |
+| `rainfall_daily_mean_mm_roll8` | 175 |
+| `rainfall_daily_mean_mm_roll12` | 275 |
+| `temperature_mean_c_roll4` | 75 |
+| `temperature_mean_c_roll8` | 175 |
+| `temperature_mean_c_roll12` | 275 |
+| `relative_humidity_mean_roll4` | 75 |
+| `relative_humidity_mean_roll8` | 175 |
+| `relative_humidity_mean_roll12` | 275 |
 
-Usable target periods: 24 to 999
+Usable target periods: 24 to 1012
 
-Windows dropped for a NaN input: 24. For a target with no observed district: 0. Kept with a partly masked target: 1.
+Windows dropped for a NaN input: 23. For a target with no observed district: 0. Kept with a partly masked target: 1.
 
-Dropped target periods: 13-23, 1000-1012
+Dropped target periods: 13-23, 1000-1011
 
 ### `v2`
 
-Total NaN cells: 4066
+Total NaN cells: 2866
 
 | Feature | NaN cells |
 | --- | --- |
 | `cases_log1p` | 1 |
-| `rainfall_daily_mean_mm` | 75 |
-| `rainy_days_frac` | 75 |
-| `temperature_mean_c` | 75 |
-| `diurnal_range_c` | 75 |
-| `dewpoint_mean_c` | 75 |
-| `relative_humidity_mean` | 75 |
-| `wind_speed_mean` | 75 |
-| `rainfall_daily_mean_mm_roll4` | 150 |
-| `rainfall_daily_mean_mm_roll8` | 250 |
-| `rainfall_daily_mean_mm_roll12` | 350 |
-| `temperature_mean_c_roll4` | 150 |
-| `temperature_mean_c_roll8` | 250 |
-| `temperature_mean_c_roll12` | 350 |
-| `relative_humidity_mean_roll4` | 150 |
-| `relative_humidity_mean_roll8` | 250 |
-| `relative_humidity_mean_roll12` | 350 |
+| `rainfall_daily_mean_mm_roll4` | 75 |
+| `rainfall_daily_mean_mm_roll8` | 175 |
+| `rainfall_daily_mean_mm_roll12` | 275 |
+| `temperature_mean_c_roll4` | 75 |
+| `temperature_mean_c_roll8` | 175 |
+| `temperature_mean_c_roll12` | 275 |
+| `relative_humidity_mean_roll4` | 75 |
+| `relative_humidity_mean_roll8` | 175 |
+| `relative_humidity_mean_roll12` | 275 |
 | `national_wave_rank` | 1 |
 | `trailing_52_cumulative_cases` | 1289 |
 
@@ -133,27 +112,20 @@ Dropped target periods: 13-63, 1000-1012
 
 ### `v3`
 
-Total NaN cells: 4091
+Total NaN cells: 2891
 
 | Feature | NaN cells |
 | --- | --- |
 | `cases_log1p` | 1 |
-| `rainfall_daily_mean_mm` | 75 |
-| `rainy_days_frac` | 75 |
-| `temperature_mean_c` | 75 |
-| `diurnal_range_c` | 75 |
-| `dewpoint_mean_c` | 75 |
-| `relative_humidity_mean` | 75 |
-| `wind_speed_mean` | 75 |
-| `rainfall_daily_mean_mm_roll4` | 150 |
-| `rainfall_daily_mean_mm_roll8` | 250 |
-| `rainfall_daily_mean_mm_roll12` | 350 |
-| `temperature_mean_c_roll4` | 150 |
-| `temperature_mean_c_roll8` | 250 |
-| `temperature_mean_c_roll12` | 350 |
-| `relative_humidity_mean_roll4` | 150 |
-| `relative_humidity_mean_roll8` | 250 |
-| `relative_humidity_mean_roll12` | 350 |
+| `rainfall_daily_mean_mm_roll4` | 75 |
+| `rainfall_daily_mean_mm_roll8` | 175 |
+| `rainfall_daily_mean_mm_roll12` | 275 |
+| `temperature_mean_c_roll4` | 75 |
+| `temperature_mean_c_roll8` | 175 |
+| `temperature_mean_c_roll12` | 275 |
+| `relative_humidity_mean_roll4` | 75 |
+| `relative_humidity_mean_roll8` | 175 |
+| `relative_humidity_mean_roll12` | 275 |
 | `national_wave_rank` | 1 |
 | `trailing_52_cumulative_cases` | 1289 |
 | `neighbor_case_velocity` | 25 |
@@ -166,27 +138,20 @@ Dropped target periods: 13-63, 1000-1012
 
 ### `v4`
 
-Total NaN cells: 4741
+Total NaN cells: 3466
 
 | Feature | NaN cells |
 | --- | --- |
 | `cases_log1p` | 1 |
-| `rainfall_daily_mean_mm` | 75 |
-| `rainy_days_frac` | 75 |
-| `temperature_mean_c` | 75 |
-| `diurnal_range_c` | 75 |
-| `dewpoint_mean_c` | 75 |
-| `relative_humidity_mean` | 75 |
-| `wind_speed_mean` | 75 |
-| `rainfall_daily_mean_mm_roll4` | 150 |
-| `rainfall_daily_mean_mm_roll8` | 250 |
-| `rainfall_daily_mean_mm_roll12` | 350 |
-| `temperature_mean_c_roll4` | 150 |
-| `temperature_mean_c_roll8` | 250 |
-| `temperature_mean_c_roll12` | 350 |
-| `relative_humidity_mean_roll4` | 150 |
-| `relative_humidity_mean_roll8` | 250 |
-| `relative_humidity_mean_roll12` | 350 |
+| `rainfall_daily_mean_mm_roll4` | 75 |
+| `rainfall_daily_mean_mm_roll8` | 175 |
+| `rainfall_daily_mean_mm_roll12` | 275 |
+| `temperature_mean_c_roll4` | 75 |
+| `temperature_mean_c_roll8` | 175 |
+| `temperature_mean_c_roll12` | 275 |
+| `relative_humidity_mean_roll4` | 75 |
+| `relative_humidity_mean_roll8` | 175 |
+| `relative_humidity_mean_roll12` | 275 |
 | `national_wave_rank` | 1 |
 | `trailing_52_cumulative_cases` | 1289 |
 | `neighbor_case_velocity` | 25 |
@@ -196,7 +161,6 @@ Total NaN cells: 4741
 | `temp_mean_lag_3` | 75 |
 | `temp_mean_lag_4` | 100 |
 | `relative_humidity_lag_4` | 100 |
-| `thermal_suitability` | 75 |
 
 Usable target periods: 64 to 999
 
