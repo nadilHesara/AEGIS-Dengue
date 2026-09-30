@@ -49,6 +49,13 @@ CALIBRATION_FOLD = 0
 
 HEADLINE_FOLDS = (1, 2, 3, 6, 7, 8, 9)
 
+# Fold 10 = the first 19 reporting periods of 2026 (Jan-May), the only weeks no
+# earlier experiment scored. Model specifications were frozen on 29 September
+# 2026, before any forecast for these weeks was made; the fold is reported
+# separately and never enters a headline number or a calibration step.
+HOLDOUT_FOLD = 10
+HOLDOUT_YEAR = 2026
+
 # Quantile levels for probabilistic forecasts: the median plus the 50%, 80%
 # and 95% central intervals, which is the level set WIS is computed over.
 QUANTILES = (0.025, 0.1, 0.25, 0.5, 0.75, 0.9, 0.975)
@@ -77,22 +84,25 @@ def load_pipeline():
     return baseline
 
 
-def build_benchmark_folds(folds_module) -> list[dict]:
+def build_benchmark_folds(folds_module, include_holdout: bool = False) -> list[dict]:
     """The project's folds, extended back one year to a calibration fold 0.
 
     Built by scripts/14's own `build_folds`, so fold 1..9 are identical to
-    `data/processed/folds.json`; only the id offset is applied here.
+    `data/processed/folds.json`; only the id offset is applied here. With
+    `include_holdout`, fold 10 (test 2026, validation 2025) is appended.
     """
 
     calendar = folds_module.load_calendar()
     regime = folds_module.load_regime_flags()
+    last_year = HOLDOUT_YEAR if include_holdout else LAST_TEST_YEAR
     folds = folds_module.build_folds(
-        calendar, regime, first_test_year=FIRST_TEST_YEAR, last_test_year=LAST_TEST_YEAR
+        calendar, regime, first_test_year=FIRST_TEST_YEAR, last_test_year=last_year
     )
     for fold in folds:
         fold["fold_id"] = int(fold["test_year"] - FIRST_TEST_YEAR)
         fold["calibration_only"] = fold["fold_id"] == CALIBRATION_FOLD
         fold["headline"] = fold["fold_id"] in HEADLINE_FOLDS
+        fold["holdout"] = fold["fold_id"] == HOLDOUT_FOLD
     return folds
 
 
@@ -107,7 +117,7 @@ def check_against_committed_folds(folds: list[dict]) -> None:
     keys = ("train_end_period", "val_start_period", "val_end_period",
             "test_start_period", "test_end_period", "fit_end_period")
     for fold in folds:
-        if fold["fold_id"] == CALIBRATION_FOLD:
+        if fold["fold_id"] in (CALIBRATION_FOLD, HOLDOUT_FOLD):
             continue
         reference = by_id[fold["fold_id"]]
         for key in keys:
@@ -131,11 +141,13 @@ def cell_frame(
     prediction: np.ndarray,
     seed: int = -1,
     quantiles: np.ndarray | None = None,
+    extra: dict[str, np.ndarray] | None = None,
 ) -> pd.DataFrame:
     """Long-format predictions for one method/fold/split/horizon/seed.
 
     `prediction` is [windows, nodes] on the case scale; `quantiles`, when
-    given, is [windows, nodes, len(QUANTILES)] on the case scale.
+    given, is [windows, nodes, len(QUANTILES)] on the case scale. `extra`
+    holds further [windows, nodes] columns (the NB mean and dispersion).
     """
 
     n_windows, n_nodes = prediction.shape
@@ -155,7 +167,74 @@ def cell_frame(
         flat = quantiles.reshape(-1, quantiles.shape[-1]).astype(np.float32)
         for index, level in enumerate(QUANTILES):
             frame[quantile_column(level)] = flat[:, index]
+    for column, values in (extra or {}).items():
+        frame[column] = np.asarray(values).reshape(-1).astype(np.float32)
     return frame
+
+
+def split_by_target(target_period_id: np.ndarray, fold: dict) -> np.ndarray:
+    """Split label ('train', 'val', 'test' or '') of each target period.
+
+    The benchmark's one split rule: a (origin, horizon) cell belongs to the
+    split its own target falls in. A model that forecasts several horizons
+    from one origin must apply it per horizon, or a validation origin carries
+    test-year targets into early stopping.
+    """
+
+    labels = np.full(np.shape(target_period_id), "", dtype=object)
+    labels[target_period_id <= fold["train_end_period"]] = "train"
+    labels[(target_period_id >= fold["val_start_period"])
+           & (target_period_id <= fold["val_end_period"])] = "val"
+    labels[(target_period_id >= fold["test_start_period"])
+           & (target_period_id <= fold["test_end_period"])] = "test"
+    return labels
+
+
+def nb_quantiles(mu: np.ndarray, alpha: np.ndarray, levels=QUANTILES) -> np.ndarray:
+    """NB2 quantiles [..., len(levels)] on the count scale (Var = mu + alpha mu^2)."""
+
+    from scipy import stats
+
+    r = 1.0 / np.maximum(alpha, 1e-6)
+    p = r / (r + np.maximum(mu, 1e-6))
+    return np.stack([stats.nbinom.ppf(level, r, p) for level in levels], axis=-1).astype(np.float32)
+
+
+def nb_exceedance(mu: np.ndarray, alpha: np.ndarray, threshold: np.ndarray) -> np.ndarray:
+    """P(Y >= threshold) under NB2, elementwise."""
+
+    from scipy import stats
+
+    r = 1.0 / np.maximum(alpha, 1e-6)
+    p = r / (r + np.maximum(mu, 1e-6))
+    k = np.maximum(np.ceil(threshold) - 1.0, -1.0)
+    return stats.nbinom.sf(k, r, p)
+
+
+def quantile_exceedance(quantiles: np.ndarray, threshold: np.ndarray,
+                        levels=QUANTILES) -> np.ndarray:
+    """P(Y >= threshold) read off a quantile forecast.
+
+    Linear interpolation of the CDF between the forecast quantiles on the
+    log1p scale, clamped to [1 - max level, 1 - min level] beyond the outer
+    ones. A ranking score and a coarse probability, not an exact CDF.
+    """
+
+    levels = np.asarray(levels, dtype=float)
+    q = np.log1p(np.maximum(np.sort(quantiles, axis=-1), 0.0))
+    t = np.log1p(np.maximum(threshold, 0.0))
+    out = np.empty(q.shape[:-1], dtype=float)
+    flat_q, flat_t, flat_out = q.reshape(-1, len(levels)), t.reshape(-1), out.reshape(-1)
+    for i in range(len(flat_t)):
+        row = flat_q[i]
+        if flat_t[i] <= row[0]:
+            flat_out[i] = 1.0 - levels[0]
+        elif flat_t[i] >= row[-1]:
+            flat_out[i] = 1.0 - levels[-1]
+        else:
+            unique, keep = np.unique(row, return_index=True)
+            flat_out[i] = 1.0 - np.interp(flat_t[i], unique, levels[keep])
+    return out
 
 
 def quantile_column(level: float) -> str:

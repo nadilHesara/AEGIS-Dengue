@@ -89,6 +89,18 @@ CLIMATE_FEATURES = (
 # ablation. Matched by suffix so a future rolling window is caught automatically.
 ROLLING_SUFFIXES = ("_roll4", "_roll8", "_roll12")
 
+# v4's hand-lagged weather and the thermal-suitability transform of temperature.
+# Weather-derived, so any climate control must move them with the rest.
+DERIVED_CLIMATE_FEATURES = (
+    "rainfall_lag_3",
+    "rainfall_lag_4",
+    "rainfall_lag_5",
+    "temp_mean_lag_3",
+    "temp_mean_lag_4",
+    "relative_humidity_lag_4",
+    "thermal_suitability",
+)
+
 
 def climate_indices(feature_names: list[str]) -> list[int]:
     """Return the indices of every climate-derived channel.
@@ -107,7 +119,7 @@ def climate_indices(feature_names: list[str]) -> list[int]:
                 base = name[: -len(suffix)]
                 break
 
-        if base in CLIMATE_FEATURES:
+        if base in CLIMATE_FEATURES or name in DERIVED_CLIMATE_FEATURES:
             indices.append(index)
 
     return indices
@@ -223,4 +235,82 @@ def shuffle_split_climate(
         shuffled["X"] = shuffle_climate(content["X"], indices, seed + 1000 * offset)
         out[split] = shuffled
 
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Tensor-level controls (applied before per-fold imputation and scaling)
+# ---------------------------------------------------------------------------
+
+def week_of_year(start_date: np.ndarray) -> np.ndarray:
+    """0..51 week-of-year index of each period's start date (week 53 folds into 51)."""
+
+    start = np.asarray(start_date).astype("datetime64[D]")
+    doy = (start - start.astype("datetime64[Y]")).astype(int)
+    return np.minimum(doy // 7, 51)
+
+
+def climatology_climate(
+    tensors: dict[str, np.ndarray],
+    indices: list[int],
+    train_end_period: int,
+) -> dict[str, np.ndarray]:
+    """Replace the climate channels with each district's week-of-year climatology.
+
+    The climatology is the mean of each channel over the periods at or before
+    `train_end_period` (training years only; the validation and test years
+    never enter it), per district and week of year. Every period, past or
+    future, is then given the climatological value for its week. Width,
+    architecture and every non-climate channel are unchanged, so the
+    comparison with the full-weather model isolates what observed weather adds
+    beyond a seasonal calendar of weather.
+    """
+
+    out = dict(tensors)
+    x = tensors["X"].copy()
+    week = week_of_year(tensors["start_date"])
+    train = tensors["period_id"] <= train_end_period
+
+    for channel in indices:
+        values = x[..., channel]
+        table = np.full((52, values.shape[1]), np.nan, dtype=np.float64)
+        for w in range(52):
+            rows = values[train & (week == w)]
+            if len(rows):
+                with np.errstate(all="ignore"):
+                    table[w] = np.nanmean(rows, axis=0)
+        fallback = np.nanmean(values[train], axis=0)
+        table = np.where(np.isnan(table), fallback[None, :], table)
+        x[..., channel] = table[week].astype(np.float32)
+
+    out["X"] = x
+    return out
+
+
+def drop_climate(tensors: dict[str, np.ndarray], indices: list[int]) -> dict[str, np.ndarray]:
+    """Remove the climate channels (the model is built for the narrower input)."""
+
+    keep = [i for i in range(tensors["X"].shape[-1]) if i not in set(indices)]
+    out = dict(tensors)
+    out["X"] = tensors["X"][..., keep]
+    out["feature_names"] = np.asarray(tensors["feature_names"])[keep]
+    return out
+
+
+def delay_climate(
+    tensors: dict[str, np.ndarray], indices: list[int], periods: int
+) -> dict[str, np.ndarray]:
+    """Shift the climate channels `periods` later, as if weather arrived late.
+
+    At origin t the model sees the weather of t - periods in the slot for t,
+    so the most recent `periods` weeks of weather are unavailable. The first
+    `periods` rows become NaN and are imputed like any missing weather.
+    """
+
+    out = dict(tensors)
+    x = tensors["X"].copy()
+    for channel in indices:
+        x[periods:, :, channel] = tensors["X"][:-periods, :, channel]
+        x[:periods, :, channel] = np.nan
+    out["X"] = x
     return out

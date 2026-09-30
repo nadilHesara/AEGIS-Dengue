@@ -43,6 +43,28 @@ Early warning
 Statistics: headline folds 1, 2, 3, 6, 7, 8, 9 (fold 0 is calibration only);
 paired t-test and fold win counts over those 7 folds, as the README does.
 
+Revision of 29 September 2026 (src/evaluation/revision.py)
+    - Two estimands, never mixed in one ranking: `mae` is the mean of the
+      three per-seed MAEs; `mae_ens` is the MAE of the seed-averaged forecast.
+    - Skill is 1 - (headline mean MAE) / (persistence headline mean MAE);
+      `skill_yearly` is the mean of the seven per-year percentage reductions.
+    - Holm adjustment over the declared primary family (PRIMARY x horizons vs
+      persistence); every other comparison is labelled exploratory.
+    - Time-block bootstrap (4-week blocks, all districts jointly) for the
+      primary comparisons, the NB ablations and the climate controls.
+    - NB arms: head, sharing and feature ablations; mean vs median point
+      forecasts; dispersion / zero / peak / 2017 / district calibration.
+    - nb_shared_v4_tsel: the thermal-suitability centre chosen per fold on the
+      validation year's NB log-likelihood.
+    - mix_nb_chronos: an equal-weight *distribution* mixture of nb_shared_v2
+      (its three seeds) and chronos2_joint; qavg_nb_chronos averages their
+      quantiles instead, for comparison.
+    - Intervals: previous-year conformal, rolling conformal (last 52 weeks of
+      residuals already observed at the origin) and adaptive conformal
+      (Gibbs and Candes 2021), with 50/80/95% coverage and width by year.
+    - Fold 10 (2026) is scored separately against the hold-out declaration.
+    - A compute table from results/benchmark/compute/*.csv.
+
 Outputs under results/benchmark/: benchmark_report.md, tables/*.csv, figures/*.png
 """
 
@@ -62,6 +84,7 @@ sys.path.insert(0, str(PROJECT_DIR))
 from src.evaluation.long_horizon import (  # noqa: E402
     BENCHMARK_DIR,
     HEADLINE_FOLDS,
+    HOLDOUT_FOLD,
     PREDICTIONS_DIR,
     QUANTILES,
     build_benchmark_folds,
@@ -69,6 +92,49 @@ from src.evaluation.long_horizon import (  # noqa: E402
     quantile_column,
     truth_frame,
     weighted_interval_score,
+)
+from src.evaluation import revision  # noqa: E402
+
+# The declared primary family (results/benchmark/holdout_declaration.md). Holm
+# adjusts these 5 x 8 comparisons with persistence; everything else is exploratory.
+PRIMARY = ("gru_v2_quantile_lw", "nb_shared_v2", "chronos2_joint", "lgbm_v2", "ens_equal")
+THERMAL_VARIANTS = ("nb_shared_v4_t26", "nb_shared_v4_t27", "nb_shared_v4",
+                    "nb_shared_v4_t29", "nb_shared_v4_t30")
+ONLINE_CONFORMAL = ("persistence", "lgbm_v2", "gru_v2", "ens_equal")
+ACI_GAMMA = 0.05  # fixed in advance; weekly updates of the miscoverage level
+COMPUTE_DIR = BENCHMARK_DIR / "compute"
+
+ABLATIONS = (
+    # (arm, reference, label, family)
+    ("gru_v2_shuffled", "gru_v2", "GRU: climate shuffled", "climate"),
+    ("gru_v2_climatology", "gru_v2", "GRU: climate -> training climatology", "climate"),
+    ("gru_v2_noclimate", "gru_v2", "GRU: climate removed", "climate"),
+    ("lgbm_v2_noclimate", "lgbm_v2", "LightGBM: climate removed", "climate"),
+    ("lgbm_v2_climatology", "lgbm_v2", "LightGBM: climate -> training climatology", "climate"),
+    ("chronos2_climate", "chronos2", "Chronos-2: climate covariates added", "climate"),
+    ("nb_shared_v2_shuffled", "nb_shared_v2", "NB: climate shuffled", "climate"),
+    ("nb_shared_v2_climatology", "nb_shared_v2", "NB: climate -> training climatology", "climate"),
+    ("nb_shared_v2_noclimate", "nb_shared_v2", "NB: climate removed", "climate"),
+    ("nb_shared_v2_wxlag1", "nb_shared_v2", "NB: weather one week late", "availability"),
+    ("gru_v2_quantile", "gru_v2", "Head: pinball vs MSE (separate, v2)", "nb"),
+    ("gru_v2_nb", "gru_v2", "Head: NB vs MSE (separate, v2)", "nb"),
+    ("gru_v2_nb", "gru_v2_quantile", "Head: NB vs pinball (separate, v2)", "nb"),
+    ("nb_shared_v2", "gru_v2_nb", "Sharing: shared trunk vs separate (NB, v2)", "nb"),
+    ("nb_shared_v3", "nb_shared_v2", "Features: v3 vs v2 (NB shared)", "nb"),
+    ("nb_shared_v4", "nb_shared_v2", "Features: v4 vs v2 (NB shared)", "nb"),
+    ("nb_shared_v4_tsel", "nb_shared_v4", "v4 thermal centre selected on validation", "nb"),
+    ("nb_shared_v2_mean", "nb_shared_v2", "NB point: mean vs median", "nb"),
+    ("gru_v2_nb_mean", "gru_v2_nb", "NB point (separate): mean vs median", "nb"),
+    ("gru_v1", "gru_v2", "GRU: outbreak-history removed (v1)", "other"),
+    ("gcn_v2", "gru_v2", "GRU: contiguity graph added", "spatial"),
+    ("adaptive_v2", "gru_v2", "GRU: learned graph added", "spatial"),
+    ("gru_v2_lw", "gru_v2", "GRU: level-weighted loss", "other"),
+    ("gru_v2_quantile_lw", "gru_v2", "GRU: level-weighted pinball", "other"),
+    ("chronos2_joint", "chronos2", "Chronos-2: joint 25-district", "spatial"),
+    ("chronos2_ft", "chronos2", "Chronos-2: LoRA fine-tuned", "other"),
+    ("chronos2_joint_ft", "chronos2_joint", "Chronos-2 joint: LoRA fine-tuned", "other"),
+    ("mix_nb_chronos", "nb_shared_v2", "Mixture NB+Chronos vs NB", "ensemble"),
+    ("mix_nb_chronos", "chronos2_joint", "Mixture NB+Chronos vs Chronos-2 joint", "ensemble"),
 )
 
 TABLE_DIR = BENCHMARK_DIR / "tables"
@@ -79,7 +145,11 @@ ENSEMBLE_MEMBERS = ("gru_v2", "lgbm_v2", "chronos2")
 # Candidates for the select-then-average ensemble: every deployable forecaster.
 # Ablation controls and the naive baselines are excluded, as are other ensembles.
 NOT_CANDIDATES = {"gru_v2_shuffled", "lgbm_v2_noclimate", "persistence", "seasonal_naive",
-                  "climatology", "seasonal_persistence", "ens_equal", "ens_stacked", "ens_top3"}
+                  "climatology", "seasonal_persistence", "ens_equal", "ens_stacked", "ens_top3",
+                  "gru_v2_climatology", "gru_v2_noclimate", "lgbm_v2_climatology",
+                  "nb_shared_v2_shuffled", "nb_shared_v2_climatology", "nb_shared_v2_noclimate",
+                  "nb_shared_v2_wxlag1", "nb_shared_v4_t26", "nb_shared_v4_t27",
+                  "nb_shared_v4_t29", "nb_shared_v4_t30", "mix_nb_chronos", "qavg_nb_chronos"}
 TOP_K = 3
 QCOLS = [quantile_column(q) for q in QUANTILES]
 ONSET_GAP = 4
@@ -305,7 +375,9 @@ def build_top_k(point: pd.DataFrame, k: int = TOP_K) -> tuple[pd.DataFrame, pd.D
     """
 
     keys = ["fold_id", "split", "horizon", "target_period_id", "node_id"]
-    candidates = point[~point["method"].isin(NOT_CANDIDATES)]
+    candidates = point[~point["method"].isin(NOT_CANDIDATES)
+                       & ~point["method"].str.endswith("_mean")
+                       & ~point["method"].str.endswith("_tsel")]
     test = candidates[(candidates["split"] == "test") & (candidates["observed"] == 1)]
     error = (test.assign(ae=(test["prediction"] - test["actual"]).abs())
              .groupby(["method", "fold_id", "horizon"])["ae"].mean().reset_index())
@@ -493,17 +565,122 @@ def fmt(value, digits=2):
     return f"{value:.{digits}f}"
 
 
+def cell_abs_error(table: pd.DataFrame, method: str) -> pd.Series:
+    """Seed-averaged absolute error per observed test cell (the `mae` estimand)."""
+
+    rows = table[(table["method"] == method) & (table["split"] == "test") & (table["observed"] == 1)]
+    rows = rows[rows["seed"] >= 0] if (rows["seed"] >= 0).any() else rows[rows["seed"] == -1]
+    error = (rows["prediction"] - rows["actual"]).abs()
+    keys = ["fold_id", "horizon", "target_period_id", "node_id"]
+    return error.groupby([rows[k] for k in keys]).mean()
+
+
+def bootstrap_rows(table, pairs, folds_used, label, n_boot) -> list[dict]:
+    """Time-block bootstrap for (method, reference, horizon) pairs on `folds_used`."""
+
+    cache: dict[str, pd.Series] = {}
+    out = []
+    for method, reference, horizon in pairs:
+        for name in (method, reference):
+            if name not in cache:
+                cache[name] = cell_abs_error(table, name)
+        a, b = cache[method], cache[reference]
+        if a.empty or b.empty:
+            continue
+        joined = pd.concat([a.rename("a"), b.rename("b")], axis=1, join="inner").reset_index()
+        joined = joined[(joined["horizon"] == horizon) & joined["fold_id"].isin(folds_used)]
+        if joined.empty:
+            continue
+        joined["diff"] = joined["a"] - joined["b"]
+        out.append({"set": label, "method": method, "reference": reference, "horizon": horizon,
+                    **revision.block_bootstrap(joined[["fold_id", "target_period_id", "diff"]],
+                                               n_boot=n_boot)})
+    return out
+
+
+def thermal_selection(predictions: pd.DataFrame, truth: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """nb_shared_v4_tsel: per fold, the thermal centre with the lowest validation NLL."""
+
+    present = [m for m in THERMAL_VARIANTS if m in set(predictions["method"])]
+    if len(present) < 2:
+        return pd.DataFrame(), pd.DataFrame()
+    subset = predictions[predictions["method"].isin(present)]
+    scored = subset[subset["split"] == "val"].merge(truth, on=["target_period_id", "node_id"])
+    nll = revision.nb_validation_nll(scored)
+    choice = revision.select_by_validation(nll, present)
+    frames = []
+    for fold_id, method in choice.items():
+        rows = subset[(subset["method"] == method) & (subset["fold_id"] == fold_id)].copy()
+        rows["method"] = "nb_shared_v4_tsel"
+        frames.append(rows)
+    nll["chosen"] = [choice.get(int(f)) == m for f, m in zip(nll["fold_id"], nll["method"])]
+    return pd.concat(frames, ignore_index=True), nll
+
+
+def mixture_ensembles(table: pd.DataFrame, nb: str = "nb_shared_v2",
+                      other: str = "chronos2_joint") -> pd.DataFrame:
+    """Distribution mixture and quantile average of an NB model and Chronos-2 (test cells)."""
+
+    keys = ["fold_id", "split", "horizon", "target_period_id", "node_id"]
+    nb_rows = table[(table["method"] == nb) & (table["seed"] >= 0) & (table["split"] == "test")]
+    other_rows = table[(table["method"] == other) & (table["seed"] == -1) & (table["split"] == "test")]
+    if nb_rows.empty or other_rows.empty:
+        return pd.DataFrame()
+    mu = nb_rows.pivot_table(index=keys, columns="seed", values="nb_mu")
+    alpha = nb_rows.pivot_table(index=keys, columns="seed", values="nb_alpha")
+    nb_q = nb_rows.groupby(keys)[QCOLS].mean()
+    other_q = other_rows.set_index(keys)[QCOLS]
+    common = mu.dropna().index.intersection(other_q.index)
+    mixed = revision.mixture_quantiles(mu.loc[common].to_numpy(), alpha.loc[common].to_numpy(),
+                                       other_q.loc[common].to_numpy())
+    averaged = np.expm1(0.5 * (np.log1p(nb_q.loc[common].to_numpy())
+                               + np.log1p(other_q.loc[common].to_numpy())))
+    frames = []
+    for name, values in (("mix_nb_chronos", mixed), ("qavg_nb_chronos", averaged)):
+        frame = common.to_frame(index=False)
+        frame[QCOLS] = np.sort(values, axis=1)
+        frame["prediction"] = frame[quantile_column(0.5)]
+        frame["method"] = name
+        frame["seed"] = -1
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
+
+
+def skill_columns(summary: pd.DataFrame, metrics: pd.DataFrame) -> pd.DataFrame:
+    """Pooled skill (ratio of headline means) and the mean of per-year skills."""
+
+    persistence = summary[summary["method"] == "persistence"].set_index("horizon")
+    summary = summary.copy()
+    summary["skill"] = [1 - r.mae / persistence.loc[r.horizon, "mae"] for r in summary.itertuples()]
+    summary["skill_ens"] = [1 - r.mae_ens / persistence.loc[r.horizon, "mae"] for r in summary.itertuples()]
+    head = metrics[metrics["fold_id"].isin(HEADLINE_FOLDS)]
+    multi = set(head.loc[head["seed"] >= 0, "method"])
+    single = head[((head["seed"] >= 0) & head["method"].isin(multi))
+                  | ((head["seed"] == -1) & ~head["method"].isin(multi))]
+    per_fold = single.groupby(["method", "horizon", "fold_id"])["mae"].mean().reset_index()
+    base = per_fold[per_fold["method"] == "persistence"].set_index(["horizon", "fold_id"])["mae"]
+    reference = base.reindex(pd.MultiIndex.from_arrays([per_fold["horizon"], per_fold["fold_id"]])).to_numpy()
+    per_fold["skill_fold"] = 1 - per_fold["mae"].to_numpy() / reference
+    yearly = per_fold.groupby(["method", "horizon"])["skill_fold"].mean().rename("skill_yearly")
+    return summary.merge(yearly.reset_index(), on=["method", "horizon"], how="left")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--exclude", nargs="*", default=[])
+    parser.add_argument("--n-boot", type=int, default=2000)
     arguments = parser.parse_args()
 
     baseline = load_pipeline()
-    folds = build_benchmark_folds(baseline.folds_module)
+    folds = build_benchmark_folds(baseline.folds_module, include_holdout=True)
     tensors = baseline.folds_module.load_tensors("v2")
     thresholds = thresholds_by_fold(tensors, folds, baseline.naive)
+    truth = truth_frame(tensors)
 
     predictions = load_predictions(set(arguments.exclude))
+    selected, thermal_record = thermal_selection(predictions, truth)
+    if len(selected):
+        predictions = pd.concat([predictions, selected], ignore_index=True)
     keys = ["fold_id", "split", "horizon", "target_period_id", "node_id"]
 
     # Common cells: the intersection over methods, so nothing is scored on weeks
@@ -515,18 +692,25 @@ def main() -> int:
     for column in ("fold_id", "horizon", "target_period_id", "node_id"):
         cells[column] = cells[column].astype(int)
     predictions = predictions.merge(cells, on=keys, how="inner")
-    print(f"{predictions['method'].nunique()} methods, {len(cells):,} common cells")
+    test_cells = cells["split"] == "test"
+    print(f"{predictions['method'].nunique()} methods, {len(cells):,} common cells "
+          f"({int(test_cells.sum()):,} test, "
+          f"{int((test_cells & (cells['fold_id'] == HOLDOUT_FOLD)).sum()):,} in the 2026 hold-out)")
 
     naive_frame = naive_predictions(cells, tensors, folds)
     seed_ensembles = seed_mean(predictions)
     table = pd.concat([predictions, seed_ensembles, naive_frame], ignore_index=True)
-
-    truth = truth_frame(tensors)
     table = table.merge(truth, on=["target_period_id", "node_id"], how="left")
     threshold_rows = pd.DataFrame([
         {"fold_id": f, "node_id": n, "threshold": t}
         for f, values in thresholds.items() for n, t in enumerate(values)])
     table = table.merge(threshold_rows, on=["fold_id", "node_id"], how="left")
+
+    mixtures = mixture_ensembles(table)
+    if len(mixtures):
+        mixtures = mixtures.merge(truth, on=["target_period_id", "node_id"], how="left") \
+            .merge(threshold_rows, on=["fold_id", "node_id"], how="left")
+        table = pd.concat([table, mixtures], ignore_index=True)
 
     # One prediction per method and cell for ensembles, intervals and warnings.
     point = table[(table["seed"] == -2) | ((table["seed"] == -1) & ~table["method"].isin(
@@ -548,57 +732,82 @@ def main() -> int:
     table = pd.concat([table, top_k], ignore_index=True)
 
     metrics = per_fold_metrics(table)
-    summary = headline(metrics)
+    summary = skill_columns(headline(metrics), metrics)
 
-    # Skill and significance against same-horizon persistence.
+    # The case-only baseline must not move when the climate or the method set changes.
+    persistence = summary[summary["method"] == "persistence"].set_index("horizon")["mae"]
+    print("persistence headline MAE, h=1-4:", persistence.reindex([1, 2, 3, 4]).round(2).tolist(),
+          "(expected 16.42, 20.16, 24.58, 28.47)")
+
+    # Skill and significance against same-horizon persistence; Holm over the
+    # declared primary family only.
     tests = []
     for (method, horizon) in summary[["method", "horizon"]].itertuples(index=False):
         if method == "persistence":
             continue
         for column in ("mae", "peak_mae"):
             result = paired(metrics, method, "persistence", horizon, column)
-            tests.append({"method": method, "horizon": horizon, "metric": column, **result})
+            family = "primary" if (method in PRIMARY and column == "mae") else "exploratory"
+            tests.append({"method": method, "horizon": horizon, "metric": column,
+                          "family": family, **result})
     tests = pd.DataFrame(tests)
+    primary = tests["family"] == "primary"
+    tests["p_holm"] = np.nan
+    tests["wilcoxon_p_holm"] = np.nan
+    tests.loc[primary, "p_holm"] = revision.holm(tests.loc[primary, "p"].to_numpy())
+    tests.loc[primary, "wilcoxon_p_holm"] = revision.holm(tests.loc[primary, "wilcoxon_p"].to_numpy())
 
-    # Ablations: climate shuffle (GRU) and climate removal (trees), graph.
+    horizons = sorted(summary["horizon"].unique())
     ablations = []
-    for arm, reference, label in (("gru_v2_shuffled", "gru_v2", "GRU: climate shuffled"),
-                                  ("lgbm_v2_noclimate", "lgbm_v2", "LightGBM: climate removed"),
-                                  ("gru_v1", "gru_v2", "GRU: outbreak-history removed (v1)"),
-                                  ("gcn_v2", "gru_v2", "GRU: contiguity graph added"),
-                                  ("adaptive_v2", "gru_v2", "GRU: learned graph added"),
-                                  ("gru_v2_lw", "gru_v2", "GRU: level-weighted loss"),
-                                  ("gru_v2_quantile", "gru_v2", "GRU: pinball (median) loss"),
-                                  ("gru_v2_quantile_lw", "gru_v2", "GRU: level-weighted pinball"),
-                                  ("chronos2_climate", "chronos2", "Chronos-2: climate covariates added"),
-                                  ("chronos2_joint", "chronos2", "Chronos-2: joint 25-district"),
-                                  ("chronos2_ft", "chronos2", "Chronos-2: LoRA fine-tuned"),
-                                  ("chronos2_joint_ft", "chronos2_joint", "Chronos-2 joint: LoRA fine-tuned")):
-        for horizon in sorted(summary["horizon"].unique()):
+    for arm, reference, label, family in ABLATIONS:
+        for horizon in horizons:
             for column in ("mae", "peak_mae"):
                 if {arm, reference} <= set(metrics["method"]):
-                    ablations.append({"comparison": label, "horizon": horizon, "metric": column,
+                    ablations.append({"comparison": label, "family": family, "arm": arm,
+                                      "reference": reference, "horizon": horizon, "metric": column,
                                       **paired(metrics, arm, reference, horizon, column)})
     ablations = pd.DataFrame(ablations)
 
-    # Probabilistic.
-    # The fold-adaptive ensembles have no fold-0 forecast to calibrate fold 1 on,
-    # so they are left out of interval scoring rather than averaged over six
-    # headline folds.
+    # Time-block bootstrap: primary vs persistence, and every ablation, headline folds.
+    present = set(table["method"])
+    pairs = [(m, "persistence", h) for m in PRIMARY if m in present for h in horizons]
+    pairs += [(a, r, h) for a, r, _, _ in ABLATIONS if {a, r} <= present for h in horizons]
+    bootstrap = pd.DataFrame(bootstrap_rows(table, pairs, HEADLINE_FOLDS, "headline", arguments.n_boot))
+    holdout_pairs = [(m, "persistence", h) for m in PRIMARY if m in present for h in horizons]
+    bootstrap_holdout = pd.DataFrame(bootstrap_rows(table, holdout_pairs, (HOLDOUT_FOLD,),
+                                                    "holdout_2026", arguments.n_boot))
+
+    # Probabilistic. Previous-year conformal for every point method; rolling and
+    # adaptive conformal for a fixed set; native and recalibrated quantiles.
     conformal = conformal_quantiles(point[~point["method"].isin(["ens_stacked", "ens_top3"])], folds)
-    native_source = table[(table["seed"].isin([-1, -2])) & table[QCOLS[0]].notna()] \
-        if QCOLS[0] in table.columns else pd.DataFrame()
-    native_frames = []
-    if len(native_source):
-        native_source = native_source[~native_source["method"].isin(
-            native_source.loc[native_source["seed"] == -2, "method"].unique())
-            | (native_source["seed"] == -2)]
-        native_frames = [native_quantiles(native_source, folds, False),
-                         native_quantiles(native_source, folds, True)]
-    probabilistic = pd.concat([conformal] + native_frames, ignore_index=True)
-    prob_scores = probabilistic_scores(probabilistic)
-    prob_summary = prob_scores.groupby(["method", "variant", "horizon"])[
-        ["wis", "peak_wis", "cov50", "cov80", "cov95"]].mean().reset_index()
+    online = []
+    for method in ONLINE_CONFORMAL:
+        for horizon in horizons:
+            group = point[(point["method"] == method) & (point["horizon"] == horizon)
+                          & (point["split"] == "test")]
+            if group.empty:
+                continue
+            for variant, gamma in (("conformal_rolling", 0.0), ("conformal_aci", ACI_GAMMA)):
+                frame = revision.online_conformal(group, horizon, gamma=gamma)
+                if len(frame):
+                    frame["variant"] = variant
+                    online.append(frame)
+    native_source = table[(table["seed"].isin([-1, -2])) & table[QCOLS[0]].notna()]
+    native_source = native_source[~native_source["method"].isin(
+        native_source.loc[native_source["seed"] == -2, "method"].unique())
+        | (native_source["seed"] == -2)]
+    native_frames = [native_quantiles(native_source, folds, False),
+                     native_quantiles(native_source, folds, True)]
+    probabilistic = pd.concat([conformal] + online + native_frames, ignore_index=True)
+    prob_scores = revision.interval_scores(probabilistic)
+    prob_summary = prob_scores[prob_scores["fold_id"].isin(HEADLINE_FOLDS)].groupby(
+        ["method", "variant", "horizon"])[["wis", "peak_wis", "cov50", "cov80", "cov95",
+                                          "width80", "width95"]].mean().reset_index()
+
+    nb_diag = pd.DataFrame()
+    if "nb_mu" in table.columns:
+        nb_rows = table[table["nb_mu"].notna() & (table["seed"] >= 0)]
+        nb_diag = revision.nb_diagnostics(nb_rows)
 
     ews, onsets = early_warning(point, tensors, thresholds)
     ews_summary = ews.groupby(["method", "horizon"])[
@@ -610,16 +819,33 @@ def main() -> int:
     onset_summary["detection_rate"] = onset_summary["detected"] / onset_summary["onsets"]
     onset_summary["detection_at_far"] = onset_summary["detected_at_far"] / onset_summary["onsets"]
 
+    holdout = metrics[metrics["fold_id"] == HOLDOUT_FOLD]
+    multi = set(holdout.loc[holdout["seed"] >= 0, "method"])
+    holdout = holdout[((holdout["seed"] >= 0) & holdout["method"].isin(multi))
+                      | ((holdout["seed"] == -1) & ~holdout["method"].isin(multi))]
+    holdout = holdout.groupby(["method", "horizon"])[["mae", "peak_mae", "cells"]].mean().reset_index()
+
+    compute_files = sorted(COMPUTE_DIR.glob("*.csv"))
+    compute = (revision.compute_table(pd.concat([pd.read_csv(f) for f in compute_files],
+                                                ignore_index=True))
+               if compute_files else pd.DataFrame())
+
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
     metrics.to_csv(TABLE_DIR / "per_fold_metrics.csv", index=False)
     summary.to_csv(TABLE_DIR / "headline_summary.csv", index=False)
     tests.to_csv(TABLE_DIR / "vs_persistence_tests.csv", index=False)
     ablations.to_csv(TABLE_DIR / "ablations.csv", index=False)
+    bootstrap.to_csv(TABLE_DIR / "bootstrap.csv", index=False)
+    bootstrap_holdout.to_csv(TABLE_DIR / "holdout_bootstrap.csv", index=False)
+    holdout.to_csv(TABLE_DIR / "holdout_2026.csv", index=False)
     prob_scores.to_csv(TABLE_DIR / "probabilistic_per_fold.csv", index=False)
     prob_summary.to_csv(TABLE_DIR / "probabilistic_summary.csv", index=False)
+    nb_diag.to_csv(TABLE_DIR / "nb_diagnostics.csv", index=False)
+    thermal_record.to_csv(TABLE_DIR / "thermal_selection.csv", index=False)
     ews.to_csv(TABLE_DIR / "early_warning_per_fold.csv", index=False)
     ews_summary.to_csv(TABLE_DIR / "early_warning_summary.csv", index=False)
     onset_summary.to_csv(TABLE_DIR / "onset_detection.csv", index=False)
+    compute.to_csv(TABLE_DIR / "compute.csv", index=False)
     if len(weights):
         weights.to_csv(TABLE_DIR / "stacking_weights.csv", index=False)
     top_k_members.to_csv(TABLE_DIR / "top_k_members.csv", index=False)
