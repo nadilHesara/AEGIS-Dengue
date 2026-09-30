@@ -1,0 +1,21 @@
+\begin{table}[t]
+\centering
+\small
+\caption{Compute cost on an RTX 4070 Laptop GPU (retrospective + hold-out fits; pilots listed separately).}
+\label{tab:compute}
+\begin{tabular}{lrrrrrr}
+\toprule
+arm & parameters & fits & mean\_s & total\_min & peak\_gpu\_mb & best\_epoch \\
+\midrule
+A origin, equal & 10028.00 & 27 & 9.51 & 4.28 & 273.92 & 32.44 \\
+B target, equal (baseline) & 10028.00 & 50 & 11.79 & 9.82 & 275.30 & 31.86 \\
+C origin, measured & 10028.00 & 27 & 11.27 & 5.07 & 273.92 & 30.89 \\
+D target, measured (proposed) & 10028.00 & 50 & 13.22 & 11.02 & 275.30 & 34.32 \\
+E fixed 1,2,3,4 & 10028.00 & 27 & 11.33 & 5.10 & 273.98 & 32.26 \\
+F h=4 only & 10028.00 & 27 & 10.88 & 4.90 & 273.98 & 33.74 \\
+G case-only utility & 10028.00 & 27 & 10.92 & 4.91 & 273.98 & 35.11 \\
+H GradNorm (climate group) & 10028.00 & 27 & 17.14 & 7.71 & 274.00 & 31.33 \\
+Utility pilots (60 units, 2 fits each) & NaN & 120 & 5.46 & 10.93 & NaN & NaN \\
+\bottomrule
+\end{tabular}
+\end{table}

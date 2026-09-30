@@ -1,0 +1,16 @@
+\begin{table}[t]
+\centering
+\small
+\caption{Provenance checks for stored reference forecasts (folds 1--9, h=1--4).}
+\label{tab:reference-provenance}
+\begin{tabular}{lrrrrrll}
+\toprule
+method & written\_after\_manifest & split\_rule\_per\_target & dates\_within\_test\_year & targets\_observed & horizons\_1\_4 & seeds & comparison \\
+\midrule
+gru\_v2\_nb & True & True & True & True & True & 0,1,2 & direct \\
+nb\_shared\_v2 & True & True & True & True & True & 0,1,2 & direct \\
+lgbm\_v2 & True & True & True & True & True & 0,1,2 & direct \\
+chronos2\_joint & True & True & True & True & True & -1 & direct \\
+\bottomrule
+\end{tabular}
+\end{table}
