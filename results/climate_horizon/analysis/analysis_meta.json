@@ -1,0 +1,11 @@
+{
+  "selected_district": "Colombo",
+  "selection_rule": "highest mean cases in fold 1 training period",
+  "direct_references": [
+    "gru_v2_nb",
+    "nb_shared_v2",
+    "lgbm_v2",
+    "chronos2_joint"
+  ],
+  "n_boot": 2000
+}

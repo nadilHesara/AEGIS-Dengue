@@ -1,0 +1,17 @@
+{
+  "written": "2026-09-30T17:50:08+05:30",
+  "supplements": "run_manifest_2026-09-30.json",
+  "manifest_sha256": "f4acdf1c65311fb1116cf64d46803245619f58be7434f415bb6b3f30fd1245cd",
+  "note": "Written after the retrospective sweep trained but before any statistics were computed or test scores inspected. src/training/climate_horizon.py: save_checkpoint retries the atomic file replace after Windows PermissionError (8 of 252 units failed on it; their partial checkpoints were deleted and the units retrained from scratch; error records kept in results/climate_horizon/logs/failed_attempts/). No change to training, data or scoring.",
+  "changed_since_freeze": {
+    "src/training/climate_horizon.py": {
+      "frozen": "0a3cce635d6fc0ad038985d21518bde4cc66238a6d4f789d00e474b65a96dd9d",
+      "now": "e0c0fbc73313ffd8caebd2b169c4516a57bc9e4bcc1fe21125190b0ba051f6a3"
+    },
+    "scripts/training/45.run_climate_horizon_sweep.py": {
+      "frozen": "bc2205901af5136c1ceb805e47238cd84752ecc914f4f54af37dd447bb8f5a89",
+      "now": "2efef6b55baed7c545860182422f90724e1b0cc8472b12f5cf17dec95f22ae3f"
+    }
+  },
+  "added": {}
+}

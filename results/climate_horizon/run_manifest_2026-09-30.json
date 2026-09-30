@@ -1,0 +1,288 @@
+{
+  "title": "Climate-horizon extension: frozen run manifest",
+  "written": "2026-09-30T16:44:09+05:30",
+  "linked_declaration": "results/benchmark/holdout_declaration.md (29 Sep 2026) and its addenda of 2026-09-30",
+  "git": {
+    "head": "98a386db92cdbf2bb546af511ac0a41dd169df88",
+    "branch": "climate-learn",
+    "extension_code_committed": false,
+    "note": "the extension code is not committed; the SHA-256 hashes below identify it exactly"
+  },
+  "code_sha256": {
+    "src/data/climate_horizon.py": "9a873430bd36ab3cd0c43ba83bc2b5fda98cd8907f40b81e0454d40e3eb5fd93",
+    "src/models/climate_horizon.py": "d66fe51c2695058817c9ebd58a5f38053ac45b85cba8309f1f147d42d47031fa",
+    "src/models/horizon_lag_encoder.py": "399debcd8969a80c94c85c348a3f01a955bbdacbd4329460d2d4b86b515450bb",
+    "src/models/lag_encoder.py": "2334f041aed914f4bc8fa2073f513f49654b51dc99a6a6f03a399268ff8693b1",
+    "src/models/negative_binomial.py": "3271b64e05dd5c06b75ceb875c9dd38949705b9f14b0de9354666f10257541ee",
+    "src/models/climate_ablation.py": "f57c277a75d88922693028e41670a9a38ae17898f5e1ef4b36c26449d4cc2f3f",
+    "src/training/climate_horizon.py": "0a3cce635d6fc0ad038985d21518bde4cc66238a6d4f789d00e474b65a96dd9d",
+    "src/training/climate_weighting.py": "57c1c8599911ad9db7af96d0047658fd9c7c540b8631dde8aab9e41328bf67c1",
+    "src/training/climate_gradnorm.py": "37fedcc791684c2d399d06b2757dbbdeaf7717d85d44749dd7d6e49246fa2ac3",
+    "src/training/climate_horizon_pilots.py": "ccd415c28f22aecb0a33d67fe2c810ef8f404aec6597838ce351b851fa6ca313",
+    "src/training/climate_horizon_weights.py": "c3b741a4bbabd9e425f06ebacad9c266ca15c8c2c4a5e22951a5a83bf5e47cbb",
+    "src/training/climate_horizon_arms.py": "cf95064066cffcbba9ad6d3279fc8e390e2cd3d56bc3c3d960bae43f1b120483",
+    "src/evaluation/climate_horizon.py": "194d968cd5ae0578fd6384cb8725ac6ef2177e66bce45ac066803b6b83a56945",
+    "src/evaluation/long_horizon.py": "e7b97c9a1a813441805298c5ba60f1e93b5396a87c335283300e2b2841d7a876",
+    "src/evaluation/revision.py": "a3f7794b942d9972f3319180b34930a3a109ad0b9f38d93d746d260668cbf32f",
+    "scripts/features/14.build_folds.py": "e550b5663d1c72cfa963a9341a7253ec2e4e00d0aa1ba1a409ec91ff14352cd9",
+    "scripts/evaluation/15.evaluate_naive_baselines.py": "56cedec5a9d78281ec6cf081de6494c64b5aebde0eb2f66ea16dc57f1bc5423c",
+    "scripts/evaluation/39.evaluate_climate_horizon.py": "12bb93f74a8f19624079f70ce0dbd270d12c7976f317de1737941b8d3662451f",
+    "scripts/training/41.run_climate_horizon_pilots.py": "a7a60f8b918a77d3be3e45e37f2bf1768b7979c1b4348091937dbb72a3809cf8",
+    "scripts/training/42.compute_climate_horizon_weights.py": "9896a02541e455227fdc3e4ebd08a26e66fa3e0e5d1931311735331e63a6b1ac",
+    "scripts/training/45.run_climate_horizon_sweep.py": "bc2205901af5136c1ceb805e47238cd84752ecc914f4f54af37dd447bb8f5a89"
+  },
+  "data": [
+    {
+      "file": "climate_daily",
+      "path": "data/raw/climate_daily_district.csv",
+      "matches_manifest": true
+    },
+    {
+      "file": "tensors_v2",
+      "path": "data/processed/model_tensors_v2.npz",
+      "matches_manifest": true
+    },
+    {
+      "file": "folds",
+      "path": "data/processed/folds.json",
+      "matches_manifest": true
+    },
+    {
+      "file": "dengue_canonical",
+      "path": "data/interim/dengue_weekly_canonical.parquet",
+      "matches_manifest": true
+    },
+    {
+      "file": "reporting_calendar",
+      "path": "data/interim/reporting_calendar.csv",
+      "matches_manifest": true
+    }
+  ],
+  "frozen": {
+    "architecture": "ClimateHorizonNB: case GCNGRU (identity adjacency, hidden 32, 2 layers) + HorizonLagEncoder (target-relative, history 26, max_delay 29, 6 bumps, softmax) + climate GRU 16; gated log-mean fusion; NB2 heads; case-based dispersion; 10,028 params",
+    "likelihood": "NB2, log mu = log1p(y_origin) + clamp(delta, \u00b110); point forecast = NB median",
+    "training": {
+      "hidden": 32,
+      "gcn_layers": 2,
+      "climate_hidden": 16,
+      "dropout": 0.2,
+      "learning_rate": 0.003,
+      "kernel_learning_rate": 0.02,
+      "weight_decay": 0.0001,
+      "batch_size": 64,
+      "max_epochs": 150,
+      "patience": 15,
+      "lag_mode": "target",
+      "common_support": false,
+      "max_delay": null
+    },
+    "loss": "pooled masked NB NLL; climate group gets grad of L_climate = sum a_h w_h L_h / sum a_h w_h, all other parameters grad of L_equal = sum a_h L_h; global clip 1.0; one Adam step",
+    "early_stopping": "unweighted validation NB NLL, patience 15, max 150 epochs, best-state restore; validation = the year before the test year",
+    "preprocessing": "per-fold imputation + z-scoring fitted on training years only (fit_end = train_end)",
+    "features": "v2 tensors; case channels 9; climate channels 7 instantaneous; rolling means excluded",
+    "origins": "every origin with 37 weeks of history; targets per split by their own date",
+    "pilots": {
+      "blocks": [
+        0,
+        1,
+        2
+      ],
+      "seeds": [
+        0,
+        1
+      ],
+      "permutation_seeds": [
+        11,
+        23,
+        37,
+        41,
+        53
+      ],
+      "season_weeks": 2,
+      "shuffle": "whole 37x7 window from the same district, donor origin in pilot-training history, +-2 weeks of year, different calendar year; frozen-model inference"
+    },
+    "utility": {
+      "primary": "g_h = MAE_shuffled - MAE_real (absolute), u_h = max(g_h, 0)",
+      "sensitivity": "u_case_h = max(0, (MAE_case - MAE_real) / (MAE_case + 1e-8))",
+      "aggregation": "MAE per unit on matched cells; mean over seeds within block; mean over blocks equally; no smoothing across folds",
+      "weights": "q = 4 u / sum u; w = (1 - rho) + rho q, rho = 0.95; uniform if sum u = 0",
+      "weights_dir": "results/climate_horizon/weights_final (blocks 0,1,2 x seeds 0,1 required)",
+      "development_weights_not_used": "results/climate_horizon/weights/fold9_* (2 blocks)"
+    },
+    "arms": {
+      "B_target_equal": {
+        "lag_mode": "target",
+        "weights": "equal",
+        "gradnorm": false,
+        "scored_on_2026": true,
+        "seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "D_target_measured": {
+        "lag_mode": "target",
+        "weights": "measured",
+        "gradnorm": false,
+        "scored_on_2026": true,
+        "seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "A_origin_equal": {
+        "lag_mode": "origin",
+        "weights": "equal",
+        "gradnorm": false,
+        "scored_on_2026": false,
+        "seeds": [
+          0,
+          1,
+          2
+        ]
+      },
+      "C_origin_measured": {
+        "lag_mode": "origin",
+        "weights": "measured",
+        "gradnorm": false,
+        "scored_on_2026": false,
+        "seeds": [
+          0,
+          1,
+          2
+        ]
+      },
+      "E_target_fixed_1234": {
+        "lag_mode": "target",
+        "weights": [
+          1.0,
+          2.0,
+          3.0,
+          4.0
+        ],
+        "gradnorm": false,
+        "scored_on_2026": false,
+        "seeds": [
+          0,
+          1,
+          2
+        ]
+      },
+      "F_target_h4_only": {
+        "lag_mode": "target",
+        "weights": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "gradnorm": false,
+        "scored_on_2026": false,
+        "seeds": [
+          0,
+          1,
+          2
+        ]
+      },
+      "G_target_caseonly_utility": {
+        "lag_mode": "target",
+        "weights": "case_only",
+        "gradnorm": false,
+        "scored_on_2026": false,
+        "seeds": [
+          0,
+          1,
+          2
+        ]
+      },
+      "H_target_gradnorm": {
+        "lag_mode": "target",
+        "weights": "equal",
+        "gradnorm": true,
+        "scored_on_2026": false,
+        "seeds": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    "folds": {
+      "retrospective": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "headline": [
+        1,
+        2,
+        3,
+        6,
+        7,
+        8,
+        9
+      ],
+      "covid_reported_separately": [
+        4,
+        5
+      ],
+      "holdout": 10
+    },
+    "metrics": "MAE (primary), peak MAE (district p90 of history up to the benchmark fit_end), NB NLL, WIS/coverage from NB quantiles; per fold = mean over observed test cells; seed-mean estimand primary (mean of per-seed MAE), seed-ensemble secondary; headline = mean of 7 folds",
+    "primary_comparison": "D_target_measured vs B_target_equal, headline MAE, each h = 1..4; paired t-test and Wilcoxon over the 7 headline folds; Holm across the 4 horizons; 4-week time-block bootstrap 95% CI (all districts jointly, 2000 resamples)",
+    "criteria": {
+      "practical_improvement": "D - B <= -0.30 MAE at h = 3 or 4 with Holm-adjusted p < 0.05 and bootstrap CI below 0",
+      "non_inferiority": "h = 1, 2: upper bound of the bootstrap 95% CI of D - B <= +0.30 MAE",
+      "otherwise": "report as no measurable difference (a valid finding)"
+    },
+    "secondary": "alignment (A vs B, C vs D), controls E/F/G/H vs B, all exploratory; references on common cells: persistence, gru_v2_nb, nb_shared_v2, lgbm_v2 (read-only)",
+    "holdout_2026": "B and D only, 5 seeds; point estimate + 4-week block bootstrap CI; wording per the 29 Sep declaration; not a blind test (see addendum)",
+    "chronos": "outside comparator only; no teacher outputs, utilities or features; fine-tuned variants excluded from the course deliverable"
+  },
+  "run_count": {
+    "pilot_units": 60,
+    "pilot_units_already_done": 4,
+    "pilot_fits": 120,
+    "retrospective_fits": 252,
+    "holdout_fits": 10,
+    "measured_seconds": {
+      "pilot_unit_mean": 18.9,
+      "pilot_unit_max": 27.1,
+      "fit_mean": 9.2,
+      "fit_max": 13.0,
+      "gradnorm_fit_mean": 14.0,
+      "hardware": "RTX 4070 Laptop GPU"
+    },
+    "estimate_minutes": {
+      "pilots": "about 18 (max 25)",
+      "retrospective": "about 41 (max 56)",
+      "holdout": "about 2",
+      "total": "about 1 hour, at most 1.5 hours on this GPU; roughly 2-3x on a Colab T4"
+    }
+  },
+  "commands": [
+    ".venv\\Scripts\\python.exe scripts\\training\\41.run_climate_horizon_pilots.py --folds 1 2 3 4 5 6 7 8 9 10 --blocks 0 1 2 --seeds 0 1",
+    ".venv\\Scripts\\python.exe scripts\\training\\42.compute_climate_horizon_weights.py --out results\\climate_horizon\\weights_final --require-blocks 0 1 2 --require-seeds 0 1",
+    ".venv\\Scripts\\python.exe scripts\\training\\45.run_climate_horizon_sweep.py --folds 1 2 3 4 5 6 7 8 9",
+    ".venv\\Scripts\\python.exe scripts\\evaluation\\39.evaluate_climate_horizon.py",
+    "# primary statistics (paired tests, Holm, block bootstrap): analysis script [PENDING], spec below",
+    "# only after the retrospective report is written:",
+    ".venv\\Scripts\\python.exe scripts\\training\\45.run_climate_horizon_sweep.py --folds 10 --holdout --confirm-holdout"
+  ],
+  "not_yet_implemented": [
+    "primary statistics script (paired tests, Holm, bootstrap) for the extension"
+  ],
+  "approval": "The repository defines no approval step for hold-out scoring (CI runs tests on PRs to main/develop only). No supervisor or reviewer approval has been obtained or is claimed."
+}

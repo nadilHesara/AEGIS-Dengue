@@ -1,0 +1,16 @@
+{
+  "written": "2026-09-30T16:49:10+05:30",
+  "supplements": "run_manifest_2026-09-30.json",
+  "manifest_sha256": "f4acdf1c65311fb1116cf64d46803245619f58be7434f415bb6b3f30fd1245cd",
+  "note": "Written before any outer test year of the extension was scored. Adds the primary statistics script (implements the frozen primary comparison and criteria; no new choices). Script 45 changed only to add per-unit checkpoints/resume, peak GPU memory, test-cell counts and error capture; training, data and scoring logic unchanged.",
+  "changed_since_freeze": {
+    "scripts/training/45.run_climate_horizon_sweep.py": {
+      "frozen": "bc2205901af5136c1ceb805e47238cd84752ecc914f4f54af37dd447bb8f5a89",
+      "now": "2efef6b55baed7c545860182422f90724e1b0cc8472b12f5cf17dec95f22ae3f"
+    }
+  },
+  "added": {
+    "scripts/evaluation/47.climate_horizon_statistics.py": "19e45cfccca62506f39b7f942a73a93f1ab9416db40d072052f274c7b614bf52",
+    "scripts/evaluation/48.write_manifest_supplement.py": "0681a848810a6d95775f5a44304935ec9e786332df904e2c27ee40dcb1dea41b"
+  }
+}
