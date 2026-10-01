@@ -60,14 +60,14 @@ still has it (all scripts pick it up unchanged).
 - Statistics as in the README: paired t over the 7 headline folds, plus Wilcoxon
   and fold win counts. 3 seeds for every trained model.
 
-## Methods (existing 17 forecasters + Experiment A + 4 naive + 3 ensembles)
+## Methods (existing 17 forecasters + Experiments A–B + 4 naive + 3 ensembles)
 
 | Family | Arms |
 | --- | --- |
 | Naive | persistence, seasonal naive, 5-year climatology, seasonal persistence |
 | GRU (identity backbone) | `gru_v1` (the short paper's model), `gru_v2` (+outbreak history), `gru_v2_shuffled` (climate time-shuffled), `gru_v2_quantile` (7-quantile pinball head), `gru_v2_lw` / `gru_v2_quantile_lw` (level-weighted loss, README §8), `gcn_v2` (contiguity graph), `adaptive_v2` (learned graph, LR selected on validation) |
 | Tabular | `lgbm_v2`, `lgbm_v2_noclimate`, `ridge_v2` (linear ARX) — case lags, climate lags to 24 weeks, neighbour and national signals, target-week season |
-| Foundation (zero-shot) | `chronos_bolt`, `chronos2`, `chronos2_climate` (past climate + known season as covariates), `chronos2_joint` (all 25 districts as one multivariate series), `timesfm2p5_zero_shot` (Google TimesFM 2.5; case history only, Experiment A) |
+| Foundation (zero-shot) | `chronos_bolt`, `chronos2`, `chronos2_climate` (past climate + known season as covariates), `chronos2_joint` (all 25 districts as one multivariate series), `timesfm2p5_zero_shot` (Google TimesFM 2.5; case history only, Experiment A), `timesfm2p5_calendar_xreg` (TimesFM + future-known calendar covariates, Experiment B) |
 | Foundation (fine-tuned) | `chronos2_ft`, `chronos2_joint_ft` — LoRA per fold on data up to train_end only |
 | Ensembles | `ens_equal` (pre-specified GRU v2 + LightGBM + Chronos-2), `ens_stacked` (NNLS on prior year), `ens_top3` (3 best on prior year) |
 
@@ -255,8 +255,9 @@ is for, remains largely unsolved with case and weather data alone.
 .venv\Scripts\python.exe scripts\training\31.long_horizon_neural.py      # ~1.5 h GPU
 .venv\Scripts\python.exe scripts\training\32.long_horizon_tabular.py     # ~20 min CPU
 .venv\Scripts\python.exe scripts\training\33.long_horizon_foundation.py  # zero-shot ~5 min, fine-tune ~45 min/arm
-.venv\Scripts\python.exe -m pip install -r requirements-timesfm.txt  # Experiment A only
+.venv\Scripts\python.exe -m pip install -r requirements-timesfm.txt  # Experiments A–B only
 .venv\Scripts\python.exe scripts\training\46.timesfm_zero_shot.py
+.venv\Scripts\python.exe scripts\training\47.timesfm_covariates.py
 .venv\Scripts\python.exe scripts\evaluation\34.long_horizon_analysis.py
 .venv\Scripts\python.exe scripts\training\36.onset_classifier.py
 .venv\Scripts\python.exe scripts\evaluation\35.long_horizon_figures.py

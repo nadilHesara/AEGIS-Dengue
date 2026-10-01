@@ -1,0 +1,14 @@
+# Experiment B-weather: TimesFM XReg with observed past weather and causal
+# seasonal-climatology weather estimates for each future forecast step.
+arm = "timesfm2p5_weather_xreg"
+checkpoint = "google/timesfm-2.5-200m-pytorch"
+input_transform = "log1p"
+max_context = 512
+per_core_batch_size = 32
+call_chunk_size = 64
+model_parameters = 200000000
+xreg_mode = "xreg + timesfm"
+ridge = 0.0
+force_xreg_on_cpu = true
+weather_columns = ["rainfall_daily_mean_mm", "temperature_mean_c", "relative_humidity_mean", "wind_speed_mean"]
+quantiles = [0.025, 0.1, 0.25, 0.5, 0.75, 0.9, 0.975]

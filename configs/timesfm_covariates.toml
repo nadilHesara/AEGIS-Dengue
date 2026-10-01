@@ -1,0 +1,15 @@
+# Experiment B: fixed TimesFM XReg settings. All covariates must be known at
+# the forecast origin; this experiment intentionally excludes future weather.
+arm = "timesfm2p5_calendar_xreg"
+checkpoint = "google/timesfm-2.5-200m-pytorch"
+input_transform = "log1p"
+max_context = 512
+per_core_batch_size = 32
+call_chunk_size = 128
+model_parameters = 200000000
+xreg_mode = "xreg + timesfm"
+ridge = 0.0
+force_xreg_on_cpu = true
+
+# The same benchmark output contract as Experiment A.
+quantiles = [0.025, 0.1, 0.25, 0.5, 0.75, 0.9, 0.975]

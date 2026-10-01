@@ -1,0 +1,7 @@
+# Experiment C only: TimesFM 2.5 Transformers + PEFT LoRA workflow.
+# The released Transformers 4.57 package only knows the older ``timesfm``
+# architecture. TimesFM 2.5 requires the newer ``timesfm2_5`` architecture.
+# Install alongside requirements-timesfm.txt; do not add to the base pipeline.
+transformers==5.18.0
+accelerate>=1.0
+peft>=0.15

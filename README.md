@@ -59,6 +59,16 @@ python scripts/training/37.train_grad_clipping.py
 # (first install: .venv\Scripts\python.exe -m pip install -r requirements-timesfm.txt)
 python scripts/training/46.timesfm_zero_shot.py
 
+# Experiment B: TimesFM + future-known calendar covariates (XReg)
+python scripts/training/47.timesfm_covariates.py
+
+# Experiment B-weather: TimesFM + causal weather and calendar covariates
+python scripts/training/48.timesfm_weather_covariates.py
+
+# Experiment C: fold-specific TimesFM 2.5 LoRA fine-tuning
+# (first install: .venv\Scripts\python.exe -m pip install --upgrade -r requirements-timesfm-finetune.txt)
+python scripts/training/49.timesfm_lora_finetune.py
+
 # Prediction from a saved GCN-GRU checkpoint and prepared .npy windows
 python scripts/inference/predict_dengue.py --checkpoint models/checkpoints/model.pt --inputs data/processed/input_windows.npy
 ```
@@ -71,6 +81,11 @@ branching rules.
 The TimesFM run is deliberately optional and leaves the existing AEGIS model
 and pipeline unchanged; its frozen zero-shot protocol is in
 [docs/timesfm_zero_shot.md](docs/timesfm_zero_shot.md).
+Experiment B's leakage-safe covariate protocol is in
+[docs/timesfm_covariates.md](docs/timesfm_covariates.md).
+The weather extension and its leakage controls are in
+[docs/timesfm_weather_covariates.md](docs/timesfm_weather_covariates.md).
+Experiment C's LoRA protocol is in [docs/timesfm_lora.md](docs/timesfm_lora.md).
 
 District-level dengue forecasting for Sri Lanka: 25 districts, 1,012 weekly
 reporting periods (2006-12-23 to 2026-05-17), ERA5-Land/CHIRPS climate plus

@@ -1,3 +1,10 @@
-# Optional dependencies for Experiment A only.  Keep this separate so the
+# Optional dependencies for Experiments A and B. Keep these separate so the
 # standard data/training environment remains unchanged.
+#
+# TimesFM's xreg extra requests ``jax[cuda]``, which does not install a usable
+# JAX runtime on Windows. Experiment B deliberately runs its small linear XReg
+# step on CPU, so pin the matching CPU JAX pair explicitly.
 timesfm[torch]==3.0.2
+jax==0.4.38
+jaxlib==0.4.38
+scikit-learn==1.6.1

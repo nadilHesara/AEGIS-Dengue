@@ -1,0 +1,13 @@
+# Experiment C: frozen fold-specific LoRA fine-tuning settings.
+arm = "timesfm2p5_lora"
+checkpoint = "google/timesfm-2.5-200m-transformers"
+context_length = 64
+horizon_length = 12
+epochs = 5
+batch_size = 16
+learning_rate = 0.0001
+lora_rank = 4
+lora_alpha = 8
+lora_dropout = 0.05
+training_samples = 2000
+seed = 42
