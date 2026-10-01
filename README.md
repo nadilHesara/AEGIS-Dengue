@@ -55,6 +55,10 @@ python scripts/training/32.train_multi_horizon_negbin.py --variant v3 --seeds 3
 # Gradient-clipping ablation for the current model (§8j)
 python scripts/training/37.train_grad_clipping.py
 
+# Experiment A: Google TimesFM 2.5, zero-shot external comparator
+# (first install: .venv\Scripts\python.exe -m pip install -r requirements-timesfm.txt)
+python scripts/training/46.timesfm_zero_shot.py
+
 # Prediction from a saved GCN-GRU checkpoint and prepared .npy windows
 python scripts/inference/predict_dengue.py --checkpoint models/checkpoints/model.pt --inputs data/processed/input_windows.npy
 ```
@@ -63,6 +67,10 @@ Training writes experiment artefacts to `results/`; store durable checkpoints
 under `models/checkpoints/`. See [docs/workflow.md](docs/workflow.md) for the
 full development flow and [CONTRIBUTING.md](CONTRIBUTING.md) for repository and
 branching rules.
+
+The TimesFM run is deliberately optional and leaves the existing AEGIS model
+and pipeline unchanged; its frozen zero-shot protocol is in
+[docs/timesfm_zero_shot.md](docs/timesfm_zero_shot.md).
 
 District-level dengue forecasting for Sri Lanka: 25 districts, 1,012 weekly
 reporting periods (2006-12-23 to 2026-05-17), ERA5-Land/CHIRPS climate plus
